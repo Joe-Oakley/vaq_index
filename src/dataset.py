@@ -41,7 +41,7 @@ class DataSet:
         np.set_printoptions(suppress=True)
     
         self.full_fname = os.path.join(self.path, '') + self.fname
-        self.dim_means = np.zeros((self.num_dimensions, 1), dtype=np.float32)
+        self.dim_means = np.zeros((1, self.num_dimensions), dtype=np.float32)
         self.cov_matrix = np.zeros((self.num_dimensions, self.num_dimensions), dtype=np.float32)
         self.transform_matrix = np.zeros((self.num_dimensions, self.num_dimensions), dtype=np.float32)
          
@@ -56,8 +56,8 @@ class DataSet:
         else:
             block = np.fromfile(file=self.file_handle, count=self.num_words_per_block, dtype=np.float32)
 
-        block = np.reshape(block, (self.num_dimensions+1, self.num_vectors_per_block), order="F")
-        block = np.delete(block, 0, 0)
+        block = np.reshape(block, (self.num_vectors_per_block, self.num_dimensions+1), order="C")
+        block = np.delete(block, 0, 1)
 
         return block
     
@@ -75,8 +75,8 @@ class DataSet:
                     block = np.fromfile(file=f, count=self.num_words_per_block, dtype=np.float32)
 
                 if block.size > 0:
-                    block = np.reshape(block, (self.num_dimensions+1, self.num_vectors_per_block), order="F")
-                    block = np.delete(block, 0, 0)
+                    block = np.reshape(block, (self.num_vectors_per_block, self.num_dimensions+1), order="C")
+                    block = np.delete(block, 0, 1)
                     # AT THIS POINT, EACH COL IS A VECTOR AND EACH ROW IS AN ATTRIBUTE (FOR 1/NUM_BLOCKS OF THE VECTORS)
 
                     yield block
@@ -91,12 +91,11 @@ class DataSet:
         # Loop over number of blocks
         for i in range(self.num_blocks):
             block = self._read_block(i)
-            
-            rowsums = np.sum(block,axis=1).reshape(self.num_dimensions, 1)
-            self.dim_means = np.add(self.dim_means,rowsums)
+            dim_sums = np.sum(block,axis=0).reshape(1, self.num_dimensions)  # (1,128)
+            self.dim_means = np.add(self.dim_means, dim_sums)
        
         self._close_file()
-        self.dim_means = self.dim_means / self.num_vectors
+        self.dim_means = np.float32(self.dim_means / self.num_vectors)
 
     #----------------------------------------------------------------------------------------------------------------------------------------
     def _calc_cov_matrix(self):
@@ -106,7 +105,7 @@ class DataSet:
         self._open_file()
 
         # Generate repmat(dim_means, 1, num_vectors_per_block)
-        rep_mean = np.tile(self.dim_means, (1, self.num_vectors_per_block))
+        rep_mean = np.tile(self.dim_means, (self.num_vectors_per_block, 1))     # (50,128)
 
         # Loop number of blocks
         for i in range(self.num_blocks):
@@ -118,12 +117,12 @@ class DataSet:
             Y = np.subtract(X, rep_mean)
 
             # Update cov matrix: C = C + Y*Y'
-            self.cov_matrix = self.cov_matrix + np.matmul(Y, Y.T)
+            self.cov_matrix = self.cov_matrix + np.matmul(Y.T, Y)
         
         self._close_file()
 
         # Divide cov matrix by num_vectors
-        self.cov_matrix = self.cov_matrix / self.num_vectors
+        self.cov_matrix = np.float32(self.cov_matrix / self.num_vectors)
 
     #----------------------------------------------------------------------------------------------------------------------------------------
     def _calc_transform_matrix(self):
@@ -181,3 +180,4 @@ class DataSet:
             self._save_dataset_vars()
 
     #----------------------------------------------------------------------------------------------------------------------------------------
+

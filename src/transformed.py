@@ -94,8 +94,6 @@ class TransformedDataSet:
             self._load_dataset_vars()
             self.full_tf_fname = os.path.join(self.path, '') + self._find_file_by_suffix('.tf')
             self.full_tp_fname = os.path.join(self.path, '') + self._find_file_by_suffix('.tp')
-
-            # Todo: update tf words per block etc if needed
         else:
             raise ValueError("Mode must be B (build) or L (load).")
 
@@ -134,12 +132,12 @@ class TransformedDataSet:
             self._open_file('tf', 'wb')
 
             # Calculate repmean; should only be in this function for mode B, so access dim_means from DS property
-            rep_mean = np.tile(self.DS.dim_means, (1, self.DS.num_vectors_per_block))
+            rep_mean = np.tile(self.DS.dim_means, (self.DS.num_vectors_per_block, 1))
             
             gene = self.DS.generate_dataset_block()       
             for X in gene:
                 Y = np.subtract(X, rep_mean)
-                Z = np.matmul(self.DS.transform_matrix, Y)
+                Z = np.matmul(Y, self.DS.transform_matrix)
                 self.tf_handle_write.write(Z)
 
             self._close_file(self.tf_handle_write)
@@ -165,7 +163,7 @@ class TransformedDataSet:
                     block = np.fromfile(file=f, count=self.tf_num_words_per_block, dtype=np.float32)
 
                     if block.size > 0:
-                        block = np.reshape(block, (self.DS.num_dimensions, self.tf_num_vectors_per_block), order="F")
+                        block = np.reshape(block, (self.tf_num_vectors_per_block, self.DS.num_dimensions), order="C")
                         yield block
                         block_idx +=1
                     else:
@@ -194,7 +192,7 @@ class TransformedDataSet:
             for X in gene_tf:
 
                # Set a row of XX to some function of block 
-                XX[(block_count * self.tf_num_vectors_per_block):((block_count + 1) * self.tf_num_vectors_per_block)] = X[i,:] #.reshape(1,self.tf_num_vectors_per_block)
+                XX[(block_count * self.tf_num_vectors_per_block):((block_count + 1) * self.tf_num_vectors_per_block)] = X[:,i] #.reshape(1,self.tf_num_vectors_per_block)
                 block_count += 1
 
             # Write current dimension to tp handle write
@@ -220,8 +218,7 @@ class TransformedDataSet:
                     block = np.fromfile(file=f, count=self.tp_num_words_per_block, dtype=np.float32)
 
                     if block.size > 0:
-
-                        block = np.reshape(block, (self.DS.num_vectors, 1), order="F") # Order F to mirror MATLAB
+                        block = np.reshape(block, (self.DS.num_vectors, 1), order="C") # Order F to mirror MATLAB
                         yield block
                         block_idx +=1
                     else:

@@ -130,11 +130,9 @@ class QuerySet:
 
         print("queries shape before reshape + trim identifiers: ", np.shape(queries))
         
-        queries = np.reshape(queries, (self.VAQ.TDS.DS.num_dimensions+1, -1), order="F") # -1 as we don't know number of queries at this point.
-        queries = np.delete(queries, 0, 0) # Queries are now (num_dims, num_queries), e.g. (64, 1000)
-        queries = queries.T # Transpose as in MATLAB. Only doing now since we need to delete identifiers first. Now (num_queries, num_dims)
-
-        print("queries shape after reshpe + trim identifiers: ", np.shape(queries))
+        queries = np.reshape(queries, (-1, self.VAQ.TDS.DS.num_dimensions+1), order="C")
+        queries = np.delete(queries, 0, 1)
+        print("queries shape after reshape + trim identifiers: ", np.shape(queries))
         
         # Set up remaining variables
         self.Q = queries
@@ -159,7 +157,8 @@ class QuerySet:
         # multiply by KLT', which is still (num_dims,num_dims)
         # repmat code example: rep_mean = np.tile(self.dim_means, (1, self.num_vectors_per_block))
 
-        print("First query point before transform: ", str(self.Q[0,:]))
+        dim0_pretransform = self.Q[:,0].copy()
+        q0_pretransform = self.Q[0,:].copy()
 
         # The commented line + block below both aim to apply the transformation to the queries. The commented line is an exact match to 
         # the MATLAB code. The block below was written to mirror the transformation done to the main dataset in transformed.py (with an
@@ -168,15 +167,21 @@ class QuerySet:
 
         # self.Q = np.matmul((self.Q - np.tile(self.dim_means.T, (self.num_queries, 1))), self.transform_matrix.T) # ORIGINAL
         
-        rep_mean = np.tile(self.dim_means, (1, self.num_queries)) 
-        X = self.Q.T  
+        rep_mean = np.tile(self.dim_means, (self.num_queries,1)) 
+        X = self.Q  
         Y = np.subtract(X, rep_mean)
-        Z = np.matmul(self.transform_matrix, Y)
+        Z = np.matmul(Y,self.transform_matrix)
         self.Q = Z
 
+        dim0_posttransform = self.Q[:,0].copy()
+        q0_posttransform = self.Q[0,:].copy()
+
         print()
-        # print("First query point after transform: ", str(self.Q[0,:]))
-        print("First query point after transform: ", str(self.Q[:,0]))
+        print("First dimension BEFORE transform   : ", dim0_pretransform.shape, dim0_pretransform)  # This is (1,50) -> The first dimension value across all the queries
+        print("First dimension AFTER  transform   : ", dim0_posttransform.shape, dim0_posttransform)  # This is (1,50) -> The first dimension value across all the queries        
+        print()
+        print("First query point BEFORE transform : ", q0_pretransform.shape, q0_pretransform)  # This is (1,50) -> The first dimension value across all the queries
+        print("First query point AFTER  transform : ", q0_posttransform.shape, q0_posttransform)  # This is (1,50) -> The first dimension value across all the queries        
 
     #----------------------------------------------------------------------------------------------------------------------------------------
     # May have a separate version of this function for the case where the entire VAQIndex fits into memory.
@@ -189,7 +194,7 @@ class QuerySet:
 
         print("Now processing query idx: ", str(query_idx))
         print("shape of self.Q: ", str(np.shape(self.Q)))
-        self.q = self.Q[:,query_idx] # self.Q is (num_queries,num_dims) -> self.q is (num_dims,)
+        self.q = self.Q[query_idx,:] # self.Q is (num_queries,num_dims) -> self.q is (num_dims,) -> The first query
         print("shape of self.q at start of run_phase_one: ", str(np.shape(self.q)))
 
         # These are (1, 50) for 50-NN 
@@ -216,7 +221,6 @@ class QuerySet:
             print()    
             print("Block/Dimension : ", block_count)
             print("----------------------")
-            print("CSET shape: ", str(np.shape(CSET)))
 
             cells_for_dim = self.cells[block_count]
             print("cells_for_dim Details : ",cells_for_dim.shape, cells_for_dim.dtype)
@@ -232,13 +236,21 @@ class QuerySet:
             # then subtract 1 from it. For this reason, we first look at boundary_vals[1], as this is the lowest boundary value
             # index which makes up the "right hand side" of a cell. After subtracting 1, this gives us the left hand side of the interval
             # which contains the query point. This is just a scalar.
-            # R = min(np.where(qj <= self.boundary_vals[1:cells_for_dim+1, block_count])) - 1 # ORIG
             print("self.boundary_vals[1:cells_for_dim+1, block_count]")
             print(self.boundary_vals[1:cells_for_dim+1, block_count])
             
+            print()
+            print("self.boundary_vals[0:cells_for_dim, block_count]")
+            print(self.boundary_vals[0:cells_for_dim, block_count])            
+            print()
+            
             # R = np.min(np.where(qj <= self.boundary_vals[1:cells_for_dim+1, block_count])) - 1    # ORIG
             
-            target_cells = np.where(qj <= self.boundary_vals[1:cells_for_dim+1, block_count])   # np.where returns a tuple. Matching indices in first element
+            # Experiment 1
+            # target_cells = np.where(qj <= self.boundary_vals[1:cells_for_dim+1, block_count])   # np.where returns a tuple. Matching indices in first element
+            target_cells = np.where(qj <= self.boundary_vals[0:cells_for_dim, block_count])   # np.where returns a tuple. Matching indices in first element
+            
+            
             print("target_cells : ", type(target_cells))
             print(target_cells)
             print()
@@ -269,8 +281,6 @@ class QuerySet:
 
              # Calculate x x=(R~=CSET); x will be (num_vectors, 1)
 
-            # print("CSET Details : ", CSET.shape, CSET.dtype)
-            # print(CSET)
             print()
             x = np.logical_not(CSET == R).astype(np.int32)
 
@@ -279,10 +289,6 @@ class QuerySet:
             # Adds the lower bound distance for the dimension in question, to a running total which becomes the overall (squared) lower bound distance. 
             # The reason we have to apply the mask x for this step is that if the query point and any of the data points reside in the same interval 
             # (along dimension j i.e. block_count), their lower bound distance needs to be 0.
-            # print("self.L  shape and dtype : ",self.L.shape, self.L.dtype)
-            # print("x       shape and dtype : ",x.shape, x.dtype)
-            # print("self.S1 shape and dtype : ",self.S1.shape, self.S1.dtype)
-
             self.L = self.L + np.multiply(x, self.S1)
 
             # Calculate U (upper bound)
@@ -401,8 +407,6 @@ class QuerySet:
         print(" <---- END OF VAQPLUS PROCESSING RUN ---->")
         print()
         
-        
-
     #----------------------------------------------------------------------------------------------------------------------------------------
     def _load_dataset_vars(self):
 

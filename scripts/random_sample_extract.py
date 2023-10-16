@@ -7,7 +7,7 @@ import os
 import random
 
 class DataSet:
-    def __init__(self, path, fname, num_vectors=None, num_dimensions=None, num_blocks=None, num_samples=None, word_size=4):
+    def __init__(self, path, fname, num_vectors=None, num_dimensions=None, num_samples=None, word_size=4):
         self.path = path
         self.fname = fname
         self.full_fname_in = None
@@ -15,7 +15,6 @@ class DataSet:
         self.full_fname_out_ids = None
         self.num_vectors = num_vectors
         self.num_dimensions = num_dimensions
-        self.num_blocks = num_blocks
         self.num_samples = num_samples
         self.word_size = word_size # 4 bytes default (float32)
         self.num_words_per_block = 0
@@ -63,9 +62,9 @@ class DataSet:
 
         np.set_printoptions(suppress=True)
 
-        total_file_words = (self.num_vectors * (self.num_dimensions+1))
+        # total_file_words = (self.num_vectors * (self.num_dimensions+1))
         # assert total_file_words % self.num_blocks == 0
-        assert (total_file_words / self.num_blocks) % (self.num_dimensions + 1) == 0, "Inconsistent number of blocks selected."
+        # assert (total_file_words / self.num_blocks) % (self.num_dimensions + 1) == 0, "Inconsistent number of blocks selected."
 
         self.full_fname_in = os.path.join(self.path, '') + self.fname
         self.full_fname_out = os.path.join(self.path, '') + self.fname + "_qry"
@@ -149,14 +148,20 @@ def main():
     # num_blocks = 7 
     # samples = 12
 
-    path = Path('datasets/siftsmall/')
-    fname = 'siftsmall'    
-    num_vectors = 10000
+    # path = Path('datasets/siftsmall/')
+    # fname = 'siftsmall'    
+    # num_vectors = 10000
+    # num_dimensions = 128
+    # num_blocks = 1 
+    # samples = 100 
+
+    path = Path('datasets/sift1m/')
+    fname = 'sift1m'    
+    num_vectors = 1000000
     num_dimensions = 128
-    num_blocks = 1 
-    samples = 10    
+    samples = 50 
     
-    dataset = DataSet(path, fname, num_vectors, num_dimensions, num_blocks, samples)
+    dataset = DataSet(path, fname, num_vectors, num_dimensions, samples)
     dataset.process()
 
 

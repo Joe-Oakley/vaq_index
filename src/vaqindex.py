@@ -7,6 +7,9 @@ import math
 from transformed import TransformedDataSet
 
 class VAQIndex:
+    
+    MAX_UINT8 = 255
+    
     def __init__(self, q_lambda=1, vaqmode='B', bit_budget=0, non_uniform_bit_alloc=True, design_boundaries=True, use_query_hist=True, tf_dataset:TransformedDataSet=None):
         self.full_vaq_fname = None 
         self.q_lambda = q_lambda
@@ -78,15 +81,12 @@ class VAQIndex:
         # Tf generator block loop - each block should be (num_dims, num_vectors_per_block)
         for block in tf_gene:
 
-            # Transpose block to (num_vectors_per_block,num_dims)
-            block = block.T
-
             # Element wise square of block
             block = np.square(block)
 
             # Sum along columns -> add to energies. Energies is (1,num_dims)
             self.energies += np.sum(block, axis=0)
-        
+        dummy=0
     #----------------------------------------------------------------------------------------------------------------------------------------
     def _allocate_bits(self):
 
@@ -98,14 +98,18 @@ class VAQIndex:
                 max_energy_dim = np.min(np.argmax(self.energies)) # np.min to cater for two dims with equal energy - unlikely!
 
                 # Double the number of "cells" for that dimension
-                self.cells[max_energy_dim] = int(self.cells[max_energy_dim] * 2)
+                if self.cells[max_energy_dim] * 2 > VAQIndex.MAX_UINT8 :
+                    pass    # Don't blow the capcity of a UINT8
+                else:
+                    self.cells[max_energy_dim] = self.cells[max_energy_dim] * 2
 
                 # Divide the energy of that dimension by 4 (for future iterations)                
                 self.energies[max_energy_dim] = self.energies[max_energy_dim] / 4
 
                 # Check there aren't more cells than data points (unlikely)
                 if self.cells[max_energy_dim] > self.TDS.DS.num_vectors:
-                    self.cells[max_energy_dim] = int(self.cells[max_energy_dim] / 2)
+                    print("WARNING : self.cells[max_energy_dim] > self.TDS.DS.num_vectors !!")
+                    self.cells[max_energy_dim] = self.cells[max_energy_dim] / 2
 
                 # Decrement temp_bb
                 else: 
@@ -117,7 +121,7 @@ class VAQIndex:
             levels = 2**bits_per_dim
 
             self.cells *= levels
-        
+        dummy=0     
     #----------------------------------------------------------------------------------------------------------------------------------------
     # Uses transposed file. Initializes boundary values such that cells are equally populated.        
     def _init_boundaries(self):
@@ -158,7 +162,7 @@ class VAQIndex:
 
             # Increment block_count
             block_count += 1
-    
+        dummy=0
     #----------------------------------------------------------------------------------------------------------------------------------------
     def _design_boundaries(self):
     # Operates on transposed file        
@@ -183,14 +187,20 @@ class VAQIndex:
             # Call Lloyd's algorithm function -> could be replaced by modified Lloyds
             # MATLAB has B(1:CELLS(i)+1, i). Say a dim has 32 cells, this goes from 1 to 33, inclusive.
             # Ours will go from 0 to 33, not inclusive at the top, so really 0->32. Should be equivalent.
-            r, c = self._lloyd(block, self.boundary_vals[0:cells_for_dim+1, block_count])   
+            
+            # Experiment 1
+            # r, c = self._lloyd(block, self.boundary_vals[0:cells_for_dim+1, block_count])   
+            r, c = self._lloyd(block, self.boundary_vals[0:cells_for_dim, block_count])   
 
             # Set boundary values to designed boundary values. Not using r; might stop returning it.
-            self.boundary_vals[0:cells_for_dim+1, block_count] = c
+            
+            # Experiment 1
+            # self.boundary_vals[0:cells_for_dim+1, block_count] = c
+            self.boundary_vals[0:cells_for_dim, block_count] = c
             
             # Increment block_count - this was missing
             block_count += 1  
-    
+        dummy=0
     #----------------------------------------------------------------------------------------------------------------------------------------
     def _lloyd(self, block, boundary_vals_in):
 
@@ -211,15 +221,19 @@ class VAQIndex:
 
         num_lloyd_iterations = 0
         while True:
-            delta_new = 0
+            delta_new = np.float32(0)
             num_lloyd_iterations += 1
+
+            # print("_lloyd while true loop")
+            # print()
 
             # Loop over intervals; careful with indices
             for i in range(num_boundary_vals - 1):
 
+                # print("    i loop : ", i)                
+
                 # Find values in block between boundary values; np.where?
                 X_i = block[np.where(np.logical_and(block >= c[i], block < c[i+1]))]
-                # print("Lloyd: shape of X_i: ", str(np.shape(X_i)))
 
                 # If any values found
                 if np.shape(X_i)[0] > 0:
@@ -233,11 +247,17 @@ class VAQIndex:
             # Sort representative values - todo: sorting algorithm selection
             r = np.sort(r)
 
+            # print()
+
             # Update boundary values based on representative values
             for j in range(1, num_boundary_vals): # MATLAB has a -1 here... don't think we need?
+
+                # print("    j loop : ", j)                
+
                 c[j] = (r[j-1] + r[j])/2
 
             # Stopping condition check
+            # print("((delta - delta_new)/delta) -> ", ((delta - delta_new)/delta))
             if ((delta - delta_new)/delta) < stop:
                 # print("Number of Lloyd's iterations: ", str(num_lloyd_iterations))
                 return r, c
@@ -260,8 +280,12 @@ class VAQIndex:
         # Loop over tp blocks (i.e. loop over dimensions)
         for block in tp_gene:
 
+            print("_create_vaqfile -> Dimension : ", block_count)
+
             # Loop over i in range(cells[block_count])
             for i in range(self.cells[block_count]):
+
+                print("                   Block     : ", i)
 
                 # A = np where statement, to find values between boundary_vals i and i+1 along current dim (idx block_count)
                 # Effectively finding the indices of all elements that lie between the two boundaries, i.e. in a particular cell.
@@ -277,19 +301,23 @@ class VAQIndex:
             # Write CSET to vaq_handle_write
             self.vaq_handle_write.write(self.cset)
             
-            # This was missing!
             block_count += 1
+            
+        # Close vaqfile
+        self._close_file(self.vaq_handle_write)
     
     #----------------------------------------------------------------------------------------------------------------------------------------
     # Gives (num_vectors, 1) block of vaq_index; all data for a single dimension.    
     def generate_vaq_block(self, start_offset=0):
 
         block_idx = start_offset
+        
+        # Reading a column of VAQ index per block. Each word (usually 4 bytes) contains 4 VAQ cells
         with open(self.full_vaq_fname, mode="rb") as f:
             
             while True:
                 # Using TDS.tp_num_words_per_block as should be same size
-                f.seek(self.TDS.tp_num_words_per_block*block_idx*self.TDS.DS.word_size, os.SEEK_SET)
+                f.seek(self.TDS.tp_num_words_per_block*block_idx, os.SEEK_SET)
                 block = np.fromfile(file=f, count=self.TDS.tp_num_words_per_block, dtype=np.uint8)
 
                 if block.size > 0:
@@ -298,7 +326,6 @@ class VAQIndex:
                     block_idx +=1
                 else:
                     break
-
 
     #----------------------------------------------------------------------------------------------------------------------------------------
     def _save_vaq_vars(self):
