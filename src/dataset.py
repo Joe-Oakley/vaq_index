@@ -27,6 +27,8 @@ class DataSet:
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
     def _open_file(self):
+        if self.file_handle is not None and not self.file_handle.closed:
+            self.file_handle.close()
         self.file_handle = open(self.full_fname, mode="rb")
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
@@ -52,17 +54,16 @@ class DataSet:
         self.transform_matrix = np.zeros((self.num_dimensions, self.num_dimensions), dtype=np.float32)
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
-    def _read_block(self, block_idx):
-
+    def _read_block(self, block_idx, file_handle=None):
         # (num_dims+1, block_size/(num_dims+1)) -> (num_dims, num_vectors_per_block) if all as float32
-
-        self.file_handle.seek(self.num_words_per_block * block_idx * self.word_size,
-                              os.SEEK_SET)  # Multiply by word_size since seek wants a byte location.
+        file_handle = self.file_handle if file_handle is None else file_handle
+        file_handle.seek(self.num_words_per_block * block_idx * self.word_size,
+                         os.SEEK_SET)  # Multiply by word_size since seek wants a byte location.
         if self.big_endian:
-            block = np.fromfile(file=self.file_handle, count=self.num_words_per_block, dtype=np.float32).byteswap(
+            block = np.fromfile(file=file_handle, count=self.num_words_per_block, dtype=np.float32).byteswap(
                 inplace=True)
         else:
-            block = np.fromfile(file=self.file_handle, count=self.num_words_per_block, dtype=np.float32)
+            block = np.fromfile(file=file_handle, count=self.num_words_per_block, dtype=np.float32)
 
         block = np.reshape(block, (self.num_vectors_per_block, self.num_dimensions + 1), order="C")
         block = np.delete(block, 0, 1)
@@ -71,27 +72,9 @@ class DataSet:
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
     def generate_dataset_block(self, start_offset=0):
-
-        block_idx = start_offset
         with open(self.full_fname, mode="rb") as f:
-
-            while True:
-                f.seek(self.num_words_per_block * block_idx * self.word_size,
-                       os.SEEK_SET)  # Multiply by word_size since seek wants a byte location.
-                if self.big_endian:
-                    block = np.fromfile(file=f, count=self.num_words_per_block, dtype=np.float32).byteswap(inplace=True)
-                else:
-                    block = np.fromfile(file=f, count=self.num_words_per_block, dtype=np.float32)
-
-                if block.size > 0:
-                    block = np.reshape(block, (self.num_vectors_per_block, self.num_dimensions + 1), order="C")
-                    block = np.delete(block, 0, 1)
-                    # AT THIS POINT, EACH COL IS A VECTOR AND EACH ROW IS AN ATTRIBUTE (FOR 1/NUM_BLOCKS OF THE VECTORS)
-
-                    yield block
-                    block_idx += 1
-                else:
-                    break
+            for i in range(start_offset, self.num_blocks):
+                yield self._read_block(i, f)
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
     def _calc_dim_means(self):
