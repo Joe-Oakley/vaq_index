@@ -2,29 +2,21 @@ import numpy as np
 from numpy import linalg as LA
 import os
 
-from dataset import DataSet
+from qsession import QSession
 
 
 class TransformedDataSet:
-    def __init__(self, path, mode='B', DS: DataSet = None):
-        self.path = path
-        self.full_tf_fname = None
-        self.full_tp_fname = None
-        self.tf_num_words_per_block = 0
-        self.tf_num_vectors_per_block = 0
-        self.tp_num_words_per_block = 0
-
-        self.dim_means = None
-        self.cov_matrix = None
-        self.transform_matrix = None
-
-        self.mode = mode
-        self.DS = DS
-
-        self.tf_handle_read = None
-        self.tf_handle_write = None
-        self.tp_handle_read = None
-        self.tp_handle_write = None
+    def __init__(self, ctx: QSession = None):
+        self.ctx                = ctx
+        self.full_tf_fname      = None
+        self.full_tp_fname      = None
+        self.tf_handle_read     = None
+        self.tf_handle_write    = None
+        self.tp_handle_read     = None
+        self.tp_handle_write    = None
+        
+        # Initialisations
+        self._initialise()
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
     def _open_file(self, ftype, mode):
@@ -66,54 +58,45 @@ class TransformedDataSet:
     def _initialise(self):
 
         np.set_printoptions(suppress=True)
+        
+        # Load DataSet means, covariance and transform matrices
+        self._load_dataset_vars()
 
-        # We are passing in a dataset object. Not explicitly copying dataset vars from DataSet object; we will 
-        # access them from the object when needed.
-        if self.mode == 'B':
+        # Initialise variables. Note that "context" variables in the parent class/object are accessed/set, as well as local properties (filenames)
+        self.full_tf_fname = os.path.join(self.ctx.path, '') + self.ctx.fname + '.tf'
+        self.full_tp_fname = os.path.join(self.ctx.path, '') + self.ctx.fname + '.tp'
+        
+        # Calculate new properties for number of words/vectors per block in transformed dataset. There are fewer words in this dataset,
+        # since identifiers have been removed.
+        total_tf_file_words = (self.ctx.num_vectors * (self.ctx.num_dimensions))
+        print("total_tf_file_words: ", str(total_tf_file_words))
 
-            # If DS isn't a dataset object, complain
-            if not isinstance(self.DS, DataSet):
-                raise ValueError("DataSet object not successfully passed in.")
-            self.full_tf_fname = os.path.join(self.path, self.DS.fname) + ".tf"
-            self.full_tp_fname = os.path.join(self.path, self.DS.fname) + ".tp"
+        assert (total_tf_file_words % self.ctx.num_blocks == 0) and (total_tf_file_words // self.ctx.num_blocks) % self.ctx.num_dimensions == 0, "Incorrect number of blocks specified"
 
-            # Calculate new properties for number of words/vectors per block in transformed dataset. There are fewer words in this dataset,
-            # since identifiers have been removed.
-            total_tf_file_words = (self.DS.num_vectors * (self.DS.num_dimensions))
-            print("total_tf_file_words: ", str(total_tf_file_words))
-            assert (total_tf_file_words % self.DS.num_blocks == 0) and (total_tf_file_words // self.DS.num_blocks) % self.DS.num_dimensions == 0, "Incorrect number of blocks specified"
-            self.tf_num_words_per_block = int(total_tf_file_words / self.DS.num_blocks)
-            print("self.tf_num_words_per_block: ", str(self.tf_num_words_per_block))
+        self.ctx.tf_num_words_per_block = int(total_tf_file_words / self.ctx.num_blocks)
+        print("self.ctx.tf_num_words_per_block: ", str(self.ctx.tf_num_words_per_block))
 
-            self.tf_num_vectors_per_block = int(self.tf_num_words_per_block / (self.DS.num_dimensions))
-            print("self.tf_num_vectors_per_block: ", str(self.tf_num_vectors_per_block))
+        self.ctx.tf_num_vectors_per_block = int(self.ctx.tf_num_words_per_block / (self.ctx.num_dimensions))
+        print("self.ctx.tf_num_vectors_per_block: ", str(self.ctx.tf_num_vectors_per_block))
 
-            self.tp_num_words_per_block = int(total_tf_file_words / self.DS.num_dimensions)
-
-        # We aren't passing in a dataset object
-        elif self.mode == 'L':
-            self._load_dataset_vars()
-            self.full_tf_fname = os.path.join(self.path, '') + self._find_file_by_suffix('.tf')
-            self.full_tp_fname = os.path.join(self.path, '') + self._find_file_by_suffix('.tp')
-        else:
-            raise ValueError("Mode must be B (build) or L (load).")
+        self.ctx.tp_num_words_per_block = int(total_tf_file_words / self.ctx.num_dimensions)
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
     def _load_dataset_vars(self):
 
-        dataset_full_varfile = os.path.join(self.path, '') + self._find_file_by_suffix('.dsvar')
+        dataset_full_varfile = os.path.join(self.ctx.path, '') + self._find_file_by_suffix('.dsvars.npz')
 
         print("Loading dataset variables from ", dataset_full_varfile)
         with np.load(dataset_full_varfile) as data:
-            self.dim_means = data['DIM_MEANS']
-            self.cov_matrix = data['COV_MATRIX']
-            self.transform_matrix = data['TRANSFORM_MATRIX']
+            self.ctx.dim_means = data['DIM_MEANS']
+            self.ctx.cov_matrix = data['COV_MATRIX']
+            self.ctx.transform_matrix = data['TRANSFORM_MATRIX']
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
     def _find_file_by_suffix(self, suffix):
         hit_count = 0
         hits = []
-        for file in os.listdir(self.path):
+        for file in os.listdir(self.ctx.path):
             if file.endswith(suffix):
                 hits.append(file)
                 hit_count += 1
@@ -125,64 +108,58 @@ class TransformedDataSet:
     # ----------------------------------------------------------------------------------------------------------------------------------------
     def _build_tf(self):
 
-        if self.mode == 'B':
+        print("Arrived at _build_tf!")
 
-            print("Arrived at _build_tf!")
+        # Get file handle for tf write
+        self._open_file('tf', 'wb')
 
-            # Get file handle for tf write
-            self._open_file('tf', 'wb')
+        # Calculate repmean; should only be in this function for mode B, so access dim_means from DS property
+        rep_mean = np.tile(self.ctx.dim_means, (self.ctx.num_vectors_per_block, 1))
+        
+        gene = self.ctx.DS.generate_dataset_block()       
+        for X in gene:
+            Y = np.subtract(X, rep_mean)
+            Z = np.matmul(Y, self.ctx.transform_matrix)
+            self.tf_handle_write.write(Z)
 
-            # Calculate repmean; should only be in this function for mode B, so access dim_means from DS property
-            rep_mean = np.tile(self.DS.dim_means, (self.DS.num_vectors_per_block, 1))
+        self._close_file(self.tf_handle_write)
 
-            gene = self.DS.generate_dataset_block()
-            for X in gene:
-                Y = np.subtract(X, rep_mean)
-                Z = np.matmul(Y, self.DS.transform_matrix)
-                self.tf_handle_write.write(Z)
-
-            self._close_file(self.tf_handle_write)
-
-            print("Finished _build_tf!")
-
-        else:
-            raise ValueError("Entered _build_tf outside of mode B.")
+        print("Finished _build_tf!")
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
-    # Gives a (64, 1729) block of transformed data    
     def generate_tf_block(self, start_offset=0):
 
-        if self.mode == 'B':
+        if self.ctx.mode in ('F','B'):
 
             block_idx = start_offset
 
             with open(self.full_tf_fname, mode="rb") as f:
-
+                
                 while True:
-                    f.seek(self.tf_num_words_per_block * block_idx * self.DS.word_size, os.SEEK_SET)
-                    block = np.fromfile(file=f, count=self.tf_num_words_per_block, dtype=np.float32)
+                    f.seek(self.ctx.tf_num_words_per_block*block_idx*self.ctx.word_size, os.SEEK_SET)
+                    block = np.fromfile(file=f, count=self.ctx.tf_num_words_per_block, dtype=np.float32)
 
                     if block.size > 0:
-                        block = np.reshape(block, (self.tf_num_vectors_per_block, self.DS.num_dimensions), order="C")
+                        block = np.reshape(block, (self.ctx.tf_num_vectors_per_block, self.ctx.num_dimensions), order="C")
                         yield block
-                        block_idx += 1
+                        block_idx +=1
                     else:
                         break
         else:
-            raise ValueError("Entered generate_tf_block outside of mode B.")
+            raise ValueError("Entered generate_tf_block outside of modes B or F.")
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
     def _build_tp(self):
 
+        print("Arrived at _build_tp!")
+        write_count = 0
+        
         # Open tp handle write
         self._open_file('tp', 'wb')
 
-        print("Arrived at _build_tp!")
-        write_count = 0
+        for i in range(self.ctx.num_dimensions):
 
-        for i in range(self.DS.num_dimensions):
-
-            XX = np.zeros(self.DS.num_vectors, dtype=np.float32)
+            XX = np.zeros(self.ctx.num_vectors, dtype=np.float32)
 
             # Init generator
             gene_tf = self.generate_tf_block()
@@ -191,10 +168,7 @@ class TransformedDataSet:
             # Generator block loop
             for X in gene_tf:
                 # Set a row of XX to some function of block
-                XX[
-                (block_count * self.tf_num_vectors_per_block):((block_count + 1) * self.tf_num_vectors_per_block)] = X[
-                                                                                                                     :,
-                                                                                                                     i]  # .reshape(1,self.tf_num_vectors_per_block)
+                XX[(block_count * self.ctx.tf_num_vectors_per_block):((block_count + 1) * self.ctx.tf_num_vectors_per_block)] = X[:,i]  
                 block_count += 1
 
             # Write current dimension to tp handle write
@@ -205,37 +179,30 @@ class TransformedDataSet:
         # Close tp handle write
         self._close_file(self.tp_handle_write)
 
+        print("Finished _build_tp!") 
+
     # ----------------------------------------------------------------------------------------------------------------------------------------
     # Gives (num_vectors, 1) block of tp; all data for a single dimension.
     def generate_tp_block(self, start_offset=0):
 
-        if self.mode == 'B':
+        if self.ctx.mode in ('F','B'):
 
             block_idx = start_offset
 
             with open(self.full_tp_fname, mode="rb") as f:
 
                 while True:
-                    f.seek(self.tp_num_words_per_block * block_idx * self.DS.word_size, os.SEEK_SET)
-                    block = np.fromfile(file=f, count=self.tp_num_words_per_block, dtype=np.float32)
+                    f.seek(self.ctx.tp_num_words_per_block * block_idx * self.ctx.word_size, os.SEEK_SET)
+                    block = np.fromfile(file=f, count=self.ctx.tp_num_words_per_block, dtype=np.float32)
 
                     if block.size > 0:
-                        block = np.reshape(block, (self.DS.num_vectors, 1), order="C")  # Order F to mirror MATLAB
+                        block = np.reshape(block, (self.ctx.num_vectors, 1), order="C")  # Order F to mirror MATLAB
                         yield block
                         block_idx += 1
                     else:
                         break
         else:
-            raise ValueError("Entered generate_tp_block outside of mode B.")
-
-    # ----------------------------------------------------------------------------------------------------------------------------------------
-    def _load_dataset_vars(self):
-
-        print("Loading dataset variables from ", self.output_path)
-        with np.load(self.output_path) as data:
-            self.dim_means = data['DIM_MEANS']
-            self.cov_matrix = data['COV_MATRIX']
-            self.transform_matrix = data['TRANSFORM_MATRIX']
+            raise ValueError("Entered generate_tp_block outside of modes F and B.")
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
     def tf_random_read(self, start_offset,
@@ -247,15 +214,12 @@ class TransformedDataSet:
 
         if block.size > 0:
             block = np.reshape(block,
-                               (1, self.DS.num_dimensions))  # Done this way round, rather than MATLAB [DIMENSION, 1]'.
+                               (1, self.ctx.num_dimensions))  # Done this way round, rather than MATLAB [DIMENSION, 1]'.
 
         return block
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
     def build(self):
-
-        # Initialisations
-        self._initialise()
 
         # Build tf - Initial dataset transformed by KLT matrix (generated in dataset.py)
         self._build_tf()

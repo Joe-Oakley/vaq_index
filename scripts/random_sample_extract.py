@@ -148,18 +148,18 @@ def main():
     # num_blocks = 7 
     # samples = 12
 
-    # path = Path('datasets/siftsmall/')
-    # fname = 'siftsmall'    
-    # num_vectors = 10000
-    # num_dimensions = 128
-    # num_blocks = 1 
-    # samples = 100 
-
-    path = Path('datasets/sift1m/')
-    fname = 'sift1m'    
-    num_vectors = 1000000
+    path = Path('datasets/siftsmall/')
+    fname = 'siftsmall'    
+    num_vectors = 10000
     num_dimensions = 128
-    samples = 50 
+    num_blocks = 1 
+    samples = 10 
+
+    # path = Path('datasets/sift1m/')
+    # fname = 'sift1m'    
+    # num_vectors = 1000000
+    # num_dimensions = 128
+    # samples = 50 
     
     dataset = DataSet(path, fname, num_vectors, num_dimensions, samples)
     dataset.process()

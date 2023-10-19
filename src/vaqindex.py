@@ -4,30 +4,21 @@ import os
 import json
 import math
 
-from transformed import TransformedDataSet
-
+from qsession import QSession
 
 class VAQIndex:
     MAX_UINT8 = 255
 
-    def __init__(self, q_lambda=1, vaqmode='B', bit_budget=0, non_uniform_bit_alloc=True, design_boundaries=True,
-                 use_query_hist=True, tf_dataset: TransformedDataSet = None):
-        self.full_vaq_fname = None
-        self.q_lambda = q_lambda
-        self.vaqmode = vaqmode
-        self.bit_budget = bit_budget
-        self.TDS = tf_dataset
-        self.non_uniform_bit_alloc = non_uniform_bit_alloc
-        self.design_boundaries = design_boundaries
-        self.use_query_hist = use_query_hist
-
-        self.vaq_handle_read = None
-        self.vaq_handle_write = None
-
-        self.energies = None
-        self.cells = None
-        self.boundary_vals = None
-        self.cset = None
+    def __init__(self, ctx: QSession = None):
+        self.ctx                = ctx
+        self.full_vaq_fname     = None 
+        self.vaq_handle_read    = None
+        self.vaq_handle_write   = None
+        self.energies           = None
+        self.cset               = None
+        
+        # Initialisations
+        self._initialise()
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
     def _open_file(self, mode):
@@ -54,31 +45,24 @@ class VAQIndex:
     # ----------------------------------------------------------------------------------------------------------------------------------------
     def _initialise(self):
 
-        # Todo: VAQ modes!
-        print("***************************************************")
-        print("***************************************************")
-        print("ARRIVED AT VAQINDEX INIT")
-        print("***************************************************")
-        print("***************************************************")
-
-        # Build full filename
-        self.full_vaq_fname = os.path.join(self.TDS.DS.path, '') + self.TDS.DS.fname + '.vaq'
-
-        # Setup vars for energy and cells
-        self.energies = np.zeros(self.TDS.DS.num_dimensions, dtype=np.float32)
-        self.cells = np.ones(self.TDS.DS.num_dimensions, dtype=np.uint8)
-        self.cset = np.ones(self.TDS.DS.num_vectors, dtype=np.float32)
-        self.cset = np.ones(self.TDS.DS.num_vectors, dtype=np.uint8)
-
-        if self.non_uniform_bit_alloc == False:
-            assert self.bit_budget % self.TDS.DS.num_dimensions == 0, "Bit budget cannot be evenly divided among dimensions (uniform bit allocation)."
+        # Set full filename
+        self.full_vaq_fname = os.path.join(self.ctx.path, '') + self.ctx.fname + '.vaq'
+        
+        if self.ctx.non_uniform_bit_alloc == False:
+            assert self.ctx.bit_budget % self.ctx.num_dimensions == 0, "Bit budget cannot be evenly divided among dimensions (uniform bit allocation)."
+            
+        # For query-only runs, load CELLS and BOUNDARY_VALS from file saved during VAQ build
+        if self.ctx.mode == 'Q':
+            self._load_vaq_vars()
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
     # Uses transformed file 
     def _calc_energies(self):
 
+        self.energies = np.zeros(self.ctx.num_dimensions, dtype=np.float32)
+
         # Init tf generator
-        tf_gene = self.TDS.generate_tf_block()
+        tf_gene = self.ctx.TDS.generate_tf_block()
 
         # Tf generator block loop - each block should be (num_dims, num_vectors_per_block)
         for block in tf_gene:
@@ -87,32 +71,33 @@ class VAQIndex:
 
             # Sum along columns -> add to energies. Energies is (1,num_dims)
             self.energies += np.sum(block, axis=0)
-        dummy = 0
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
     def _allocate_bits(self):
 
-        if self.non_uniform_bit_alloc:
+        self.ctx.cells = np.ones(self.ctx.num_dimensions, dtype=np.uint8)  
 
-            temp_bb = self.bit_budget
+        if self.ctx.non_uniform_bit_alloc:
+
+            temp_bb = self.ctx.bit_budget
             while temp_bb > 0:
                 # Get index of dimension with maximum energy
                 max_energy_dim = np.min(
                     np.argmax(self.energies))  # np.min to cater for two dims with equal energy - unlikely!
 
                 # Double the number of "cells" for that dimension
-                if self.cells[max_energy_dim] * 2 > VAQIndex.MAX_UINT8:
+                if self.ctx.cells[max_energy_dim] * 2 > VAQIndex.MAX_UINT8:
                     pass  # Don't blow the capcity of a UINT8
                 else:
-                    self.cells[max_energy_dim] = self.cells[max_energy_dim] * 2
+                    self.ctx.cells[max_energy_dim] = self.ctx.cells[max_energy_dim] * 2
 
                 # Divide the energy of that dimension by 4 (for future iterations)                
                 self.energies[max_energy_dim] = self.energies[max_energy_dim] / 4
 
                 # Check there aren't more cells than data points (unlikely)
-                if self.cells[max_energy_dim] > self.TDS.DS.num_vectors:
-                    print("WARNING : self.cells[max_energy_dim] > self.TDS.DS.num_vectors !!")
-                    self.cells[max_energy_dim] = self.cells[max_energy_dim] / 2
+                if self.ctx.cells[max_energy_dim] > self.ctx.num_vectors:
+                    print("WARNING : self.ctx.cells[max_energy_dim] > self.ctx.num_vectors !!")
+                    self.ctx.cells[max_energy_dim] = self.ctx.cells[max_energy_dim] / 2
 
                 # Decrement temp_bb
                 else:
@@ -120,20 +105,20 @@ class VAQIndex:
 
         # Uniform bit allocation - have already asserted that bit budget divides by num_dims
         else:
-            bits_per_dim = int(self.bit_budget / self.TDS.DS.num_dimensions)
+            bits_per_dim = int(self.ctx.bit_budget / self.ctx.num_dimensions)
             levels = 2 ** bits_per_dim
 
-            self.cells *= levels
-        dummy = 0
+            self.ctx.cells *= levels
+
         # ----------------------------------------------------------------------------------------------------------------------------------------
 
     # Uses transposed file. Initializes boundary values such that cells are equally populated.
     def _init_boundaries(self):
 
-        self.boundary_vals = np.zeros((np.max(self.cells) + 1, self.TDS.DS.num_dimensions), dtype=np.float32)
+        self.ctx.boundary_vals = np.zeros((np.max(self.ctx.cells)+1, self.ctx.num_dimensions), dtype=np.float32)
 
         # Set up tp generator
-        tp_gene = self.TDS.generate_tp_block()
+        tp_gene = self.ctx.TDS.generate_tp_block()
 
         # Set up block counter. Also effectively a dimension counter.
         block_count = 0
@@ -148,9 +133,9 @@ class VAQIndex:
             # Set first boundary_val (0) along current dimension to min(block) - 0.001; just less than min value
             # along dimension N.B. self.boundary_vals is (max(self.cells) + 1, num_dimensions). +1 as there are k+1
             # boundary values for k cells.
-            self.boundary_vals[0, block_count] = sorted_block[0] - 0.001
+            self.ctx.boundary_vals[0, block_count] = sorted_block[0] - 0.001
 
-            cells_for_dim = self.cells[block_count]
+            cells_for_dim = self.ctx.cells[block_count]
 
             # Loop over the number of cells allocated to current dimension - careful with indices, should start at 1 and go to penultimate.
             # If cells_for_dim = 32, this will go to idx 31. That's fine, because boundary_vals goes up to max(cells) + 1.
@@ -158,23 +143,22 @@ class VAQIndex:
                 # Set boundary vals
                 # Not adding 1 to j idx, because we start at 0 in Python.
                 # Using math ceil; alternative is np
-                self.boundary_vals[j, block_count] = sorted_block[
-                    math.ceil(j * self.TDS.DS.num_vectors / cells_for_dim)]
+                self.ctx.boundary_vals[j, block_count] = sorted_block[
+                    math.ceil(j * self.ctx.num_vectors / cells_for_dim)]
 
             # Set final boundary val along current dim
             # Using idx cells_for_dim is safe since boundary_vals goes up to max(cells) + 1
-            self.boundary_vals[cells_for_dim, block_count] = sorted_block[self.TDS.DS.num_vectors - 1] + 0.001
+            self.ctx.boundary_vals[cells_for_dim, block_count] = sorted_block[self.ctx.num_vectors - 1] + 0.001
 
             # Increment block_count
             block_count += 1
-        dummy = 0
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
     def _design_boundaries(self):
-        # Operates on transposed file
+    # Operates on transposed file
 
         # Set up tp generator
-        tp_gene = self.TDS.generate_tp_block()
+        tp_gene = self.ctx.TDS.generate_tp_block()
 
         # Set up block counter, this is also dimension counter
         block_count = 0
@@ -183,11 +167,11 @@ class VAQIndex:
         for block in tp_gene:
 
             # Extract cells for current dimension
-            cells_for_dim = self.cells[block_count]
+            cells_for_dim = self.ctx.cells[block_count]
 
             # If current dimension only has 1 cell (i.e. 0 bits allocated to it), then break and end.
             # We should break rather than continue, because I'm pretty sure values in self.cells are implicitly sorted descending?
-            if self.cells[block_count] == 1:
+            if self.ctx.cells[block_count] == 1:
                 break
 
             # Call Lloyd's algorithm function -> could be replaced by modified Lloyds
@@ -196,17 +180,16 @@ class VAQIndex:
 
             # Experiment 1
             # r, c = self._lloyd(block, self.boundary_vals[0:cells_for_dim+1, block_count])   
-            r, c = self._lloyd(block, self.boundary_vals[0:cells_for_dim, block_count])
+            r, c = self._lloyd(block, self.ctx.boundary_vals[0:cells_for_dim, block_count])
 
             # Set boundary values to designed boundary values. Not using r; might stop returning it.
 
             # Experiment 1
             # self.boundary_vals[0:cells_for_dim+1, block_count] = c
-            self.boundary_vals[0:cells_for_dim, block_count] = c
+            self.ctx.boundary_vals[0:cells_for_dim, block_count] = c
 
             # Increment block_count - this was missing
             block_count += 1
-        dummy = 0
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
     def _lloyd(self, block, boundary_vals_in):
@@ -275,8 +258,11 @@ class VAQIndex:
     # Writes the vaqfile -> use vaq_handle_write     
     def _create_vaqfile(self):
 
+        # Could init this in loop?
+        self.cset = np.ones(self.ctx.num_vectors, dtype=np.uint8)
+
         # Setup tp generator
-        tp_gene = self.TDS.generate_tp_block()
+        tp_gene = self.ctx.TDS.generate_tp_block()
 
         # Setup tp block counter -> also dimension counter
         block_count = 0
@@ -287,16 +273,16 @@ class VAQIndex:
         # Loop over tp blocks (i.e. loop over dimensions)
         for block in tp_gene:
 
-            print("_create_vaqfile -> Dimension : ", block_count)
+            # print("_create_vaqfile -> Dimension : ", block_count)
 
             # Loop over i in range(cells[block_count])
-            for i in range(self.cells[block_count]):
-                print("                   Block     : ", i)
+            for i in range(self.ctx.cells[block_count]):
+                # print("                   Block     : ", i)
 
                 # A = np where statement, to find values between boundary_vals i and i+1 along current dim (idx block_count)
                 # Effectively finding the indices of all elements that lie between the two boundaries, i.e. in a particular cell.
-                l = self.boundary_vals[i, block_count]
-                r = self.boundary_vals[i + 1, block_count]
+                l = self.ctx.boundary_vals[i, block_count]
+                r = self.ctx.boundary_vals[i + 1, block_count]
                 A = np.where(np.logical_and(block >= l, block < r))[0]
 
                 # MATLAB: Set CSET of those indices to the k-1. Effectively, if a record lies between the 1st and 2nd boundary value, assign it 
@@ -323,11 +309,11 @@ class VAQIndex:
 
             while True:
                 # Using TDS.tp_num_words_per_block as should be same size
-                f.seek(self.TDS.tp_num_words_per_block * block_idx, os.SEEK_SET)
-                block = np.fromfile(file=f, count=self.TDS.tp_num_words_per_block, dtype=np.uint8)
+                f.seek(self.ctx.tp_num_words_per_block * block_idx, os.SEEK_SET)
+                block = np.fromfile(file=f, count=self.ctx.tp_num_words_per_block, dtype=np.uint8)
 
                 if block.size > 0:
-                    block = np.reshape(block, (self.TDS.DS.num_vectors, 1))
+                    block = np.reshape(block, (self.ctx.num_vectors, 1))
                     yield block
                     block_idx += 1
                 else:
@@ -335,21 +321,38 @@ class VAQIndex:
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
     def _save_vaq_vars(self):
-        pass
+        np.savez(os.path.join(self.ctx.path, '') + self.ctx.fname + '.vaqvars', 
+                 CELLS=self.ctx.cells, BOUNDARY_VALS=self.ctx.boundary_vals)
 
+    # ----------------------------------------------------------------------------------------------------------------------------------------
+    def _load_vaq_vars(self):
+        vaq_full_varfile = os.path.join(self.ctx.path, '') + self._find_file_by_suffix('.vaqvars.npz')
+
+        print("Loading vaq variables from ", vaq_full_varfile)
+        with np.load(vaq_full_varfile) as data:
+            self.ctx.cells = data['CELLS']
+            self.ctx.boundary_vals = data['BOUNDARY_VALS']
+
+    #----------------------------------------------------------------------------------------------------------------------------------------
+    def _find_file_by_suffix(self, suffix):
+        hit_count = 0
+        hits = []
+        for file in os.listdir(self.ctx.path):
+            if file.endswith(suffix):
+                hits.append(file)
+                hit_count += 1
+        if hit_count > 1:
+            raise ValueError("Too many hits for suffix ", str(suffix))
+        else:
+            return hits[0]
+    
     # ----------------------------------------------------------------------------------------------------------------------------------------
     def _load_vaqfile(self):
         pass
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
-    def _load_vaq_vars(self):
-        pass
-
-    # ----------------------------------------------------------------------------------------------------------------------------------------
     def build(self):
-        # Initialisations
-        self._initialise()
-
+        
         # Calculate energies
         self._calc_energies()
 
@@ -360,7 +363,11 @@ class VAQIndex:
         self._init_boundaries()
 
         # Design boundary values (with Lloyd's)
-        self._design_boundaries()
+        if self.ctx.design_boundaries:
+            self._design_boundaries()
+
+        # Save cells and boundary_vals for use elsewhere
+        self._save_vaq_vars()
 
         # Create vaqfile
         self._create_vaqfile()
