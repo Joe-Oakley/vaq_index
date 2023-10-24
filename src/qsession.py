@@ -6,12 +6,16 @@ import timeit
 from datetime import datetime
 
 class QSession:
-    def __init__(self, path, fname, mode = "B", use_qhist=True, query_k=2, query_fname=None, num_vectors=None, num_dimensions=None, num_blocks=1, word_size=4, big_endian=False, \
-                 q_lambda=1, bit_budget=0, non_uniform_bit_alloc=True, design_boundaries=True, dual_phase=True):
+
+    DEBUG = True
+    
+    def __init__(self, path, fname, mode = "B", create_qhist=True, use_qhist=True, query_k=2, query_fname=None, num_vectors=None, num_dimensions=None, num_blocks=1, word_size=4, big_endian=False, \
+                 q_lambda=1, bit_budget=0, non_uniform_bit_alloc=True, design_boundaries=True, dual_phase=True, inmem_vaqdata=False, relative_dist = True):
         
         self.path                   = path
         self.fname                  = fname
         self.mode                   = mode
+        self.create_qhist           = create_qhist
         self.use_qhist              = use_qhist
         self.query_k                = query_k
         self.query_fname            = query_fname
@@ -25,6 +29,10 @@ class QSession:
         self.non_uniform_bit_alloc  = non_uniform_bit_alloc
         self.design_boundaries      = design_boundaries
         self.dual_phase             = dual_phase
+        self.inmem_vaqdata          = inmem_vaqdata
+        self.relative_dist          = relative_dist
+
+        np.set_printoptions(linewidth=200)
                 
     #----------------------------------------------------------------------------------------------------------------------------------------
     def _initialise(self):
@@ -66,11 +74,16 @@ class QSession:
         # update_stats(metric, duration)
         pass
     #----------------------------------------------------------------------------------------------------------------------------------------
-    def debug_timer(self, reference_time, message):
-        current_time = timeit.default_timer()
-        print("[TIMER] " , message , "            Elapsed: ", str(current_time - reference_time))    
-        
-        # layer_start_reference_time = timeit.default_timer()
+    def debug_timer(self, function, reference_time, message, indent=0):
+        tabs = ''
+        if QSession.DEBUG:
+            for i in range(indent + 1):
+                tabs += '\t'
+            current_time = timeit.default_timer()
+            msg = function + ' -> ' + message
+            elapsed = tabs + str(current_time - reference_time)
+            print("[TIMER] " , msg , "            Elapsed: ", elapsed)  
+    
     #----------------------------------------------------------------------------------------------------------------------------------------
     def run(self):
         
@@ -108,21 +121,21 @@ class QSession:
             print("Instantiating and processing DataSet")
             self.DS = DataSet(ctx=self)
             self.DS.process()
-            self.debug_timer(DS_start_time, "DataSet processing elapsed time")
+            self.debug_timer('QSession.run', DS_start_time, "DataSet processing elapsed time")
             print()            
             
             TDS_start_time = timeit.default_timer()
             print("Instantiating and building TransformedDataSet")        
             self.TDS = TransformedDataSet(ctx=self)
             self.TDS.build()
-            self.debug_timer(TDS_start_time, "TransformedDataSet processing elapsed time")
+            self.debug_timer('QSession.run', TDS_start_time, "TransformedDataSet processing elapsed time")
             print()            
 
             VAQ_start_time = timeit.default_timer()
             print("Instantiating and building VAQIndex")        
             self.VAQ = VAQIndex(ctx=self)
             self.VAQ.build()
-            self.debug_timer(VAQ_start_time, "VAQIndex processing elapsed time")        
+            self.debug_timer('QSession.run', VAQ_start_time, "VAQIndex processing elapsed time")        
             print()
 
             # QuerySet only required for Mode F
@@ -131,7 +144,7 @@ class QSession:
                 print("Instantiating and processing QuerySet")        
                 self.QS = QuerySet(ctx=self)
                 self.QS.process()
-                self.debug_timer(QS_start_time, "QuerySet processing elapsed time")        
+                self.debug_timer('QSession.run', QS_start_time, "QuerySet processing elapsed time")
                 print()
 
         # Mode Q : QUERY -> Instantiate (but do not process/build) TransformedDataSet and VAQIndex objects. Create and process QuerySet object.
@@ -139,20 +152,20 @@ class QSession:
             TDS_start_time = timeit.default_timer()
             print("Instantiating TransformedDataSet")        
             self.TDS = TransformedDataSet(ctx=self)
-            self.debug_timer(TDS_start_time, "TransformedDataSet processing elapsed time")
+            self.debug_timer('QSession.run', TDS_start_time, "TransformedDataSet processing elapsed time")
             print()                 
             
             VAQ_start_time = timeit.default_timer()
             print("Instantiating VAQIndex")        
             self.VAQ = VAQIndex(ctx=self)
-            self.debug_timer(VAQ_start_time, "VAQIndex processing elapsed time")        
+            self.debug_timer('QSession.run', VAQ_start_time, "VAQIndex processing elapsed time")        
             print()
 
             QS_start_time = timeit.default_timer()
             print("Instantiating and processing QuerySet")        
             self.QS = QuerySet(ctx=self)
             self.QS.process()
-            self.debug_timer(QS_start_time, "QuerySet processing elapsed time")        
+            self.debug_timer('QSession.run', QS_start_time, "QuerySet processing elapsed time")
             print()
 
                 

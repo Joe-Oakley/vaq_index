@@ -10,25 +10,50 @@ class VAQIndex:
     MAX_UINT8 = 255
 
     def __init__(self, ctx: QSession = None):
-        self.ctx                = ctx
-        self.full_vaq_fname     = None 
-        self.vaq_handle_read    = None
-        self.vaq_handle_write   = None
-        self.energies           = None
-        self.cset               = None
+        self.ctx                  = ctx
+        self.full_vaq_fname       = None 
+        self.full_qhist_fname     = None # Should this be in qsession?
+        self.full_weights_fname   = None # Writing weights will be useful when updating VAQ later.
+        self.vaq_handle_read      = None
+        self.vaq_handle_write     = None
+        self.qhist_handle_read    = None
+        self.qhist_handle_write   = None
+        self.weights_handle_read  = None
+        self.weights_handle_write = None
+        self.energies             = None
+        self.cset                 = None
+        self.vaqdata              = None
+        self.weights              = None # Probably only needed here
         
         # Initialisations
         self._initialise()
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
-    def _open_file(self, mode):
+    def _open_file(self, ftype, mode):
 
-        if mode == 'rb':
-            self.vaq_handle_read = open(self.full_vaq_fname, mode=mode)
-        elif mode == 'wb':
-            self.vaq_handle_write = open(self.full_vaq_fname, mode=mode)
+        if ftype == 'vaq':
+            if mode == 'rb':
+                self.vaq_handle_read = open(self.full_vaq_fname, mode=mode)
+            elif mode == 'wb':
+                self.vaq_handle_write = open(self.full_vaq_fname, mode=mode)
+            else:
+                raise ValueError("Invalid mode selected: ", mode)
+        elif ftype == 'qhist':
+            if mode == 'rb':
+                self.qhist_handle_read = open(self.full_qhist_fname, mode=mode)
+            elif mode == 'wb':
+                self.qhist_handle_write = open(self.full_qhist_fname, mode=mode)
+            else:
+                raise ValueError("Invalid mode selected: ", mode)
+        elif ftype == 'weights':
+            if mode == 'rb':
+                self.weights_handle_read = open(self.full_weights_fname, mode=mode)
+            elif mode == 'wb':
+                self.weights_handle_write = open(self.full_weights_fname, mode=mode)
+            else:
+                raise ValueError("Invalid mode selected: ", mode)
         else:
-            raise ValueError("Invalid mode selected: ", mode)
+            raise ValueError("Invalid ftype selected: ", ftype)
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
     def _close_file(self, handle):
@@ -37,6 +62,14 @@ class VAQIndex:
             self.vaq_handle_read = None
         elif handle == self.vaq_handle_write:
             self.vaq_handle_write = None
+        elif handle == self.qhist_handle_read:
+            self.qhist_handle_read = None
+        elif handle == self.qhist_handle_write:
+            self.qhist_handle_write = None
+        elif handle == self.weights_handle_read:
+            self.weights_handle_read = None
+        elif handle == self.weights_handle_write:
+            self.weights_handle_write = None
         else:
             raise ValueError("Invalid handle given to _close_file().")
 
@@ -54,6 +87,14 @@ class VAQIndex:
         # For query-only runs, load CELLS and BOUNDARY_VALS from file saved during VAQ build
         if self.ctx.mode == 'Q':
             self._load_vaq_vars()
+
+            # If in-memory vaq file, load it
+            if self.ctx.inmem_vaqdata: # Careful which mode you're in?
+                self._load_vaqdata()
+
+        if self.ctx.use_qhist:
+            self.full_qhist_fname = os.path.join(self.ctx.path, '') + self.ctx.fname + '.qhist'
+            self.full_weights_fname = os.path.join(self.ctx.path, '') + self.ctx.fname + '.weights'
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
     # Uses transformed file 
@@ -110,8 +151,75 @@ class VAQIndex:
 
             self.ctx.cells *= levels
 
-        # ----------------------------------------------------------------------------------------------------------------------------------------
+    # ----------------------------------------------------------------------------------------------------------------------------------------
+    def _assign_weights(self):
 
+        # Instantiate weights array: np ones, (num_vectors, 1)
+        self.weights = np.ones(self.ctx.num_vectors, dtype=np.float32)
+
+        print("weights before: " , self.weights)
+
+        # Open qhist file (read)
+        self._open_file('qhist', 'rb')
+
+        # Read first word -> num_queries (in qhist file)
+        byte_counter = 0
+        self.qhist_handle_read.seek(byte_counter, os.SEEK_SET) # Seek takes a byte counter
+        num_queries_qhist = np.fromfile(file=self.qhist_handle_read, count=1, dtype=np.uint32)[0] # Count is in words
+        # num_queries_qhist = num_queries_qhist[0]
+        byte_counter += self.ctx.word_size
+
+        # Loop over num_queries:
+        for i in range(num_queries_qhist):
+
+            # Read 4 words (np.fromfile): query_id, query_k, phase 1 elims, phase 2 visits
+            self.qhist_handle_read.seek(byte_counter, os.SEEK_SET)
+            q_info = np.fromfile(file=self.qhist_handle_read, count = 4, dtype=np.uint32)
+            q_info = np.reshape(q_info, (4,1), order="C")
+            q_id, q_k, q_p1, q_p2 = q_info[0,0], q_info[1,0], q_info[2,0], q_info[3,0] 
+            byte_counter += 4 * self.ctx.word_size
+
+            # Read next (2*query_k) words (np.fromfile) -> reshape into (k, 2) distances matrix, probably order C
+            self.qhist_handle_read.seek(byte_counter, os.SEEK_SET)
+            distances = np.fromfile(file=self.qhist_handle_read, count = 2*q_k, dtype=np.float32)
+            distances = np.reshape(distances, (q_k, 2), order='C')
+            byte_counter += 2 * q_k * self.ctx.word_size
+
+            # Loop over rows k of distances matrix
+            for j in range(q_k):
+
+                # Calculate query visit ratio for this query
+                qvr = np.divide(q_p2, q_k)
+
+                # Update self.weights[k]
+                vector_id = int(distances[j,0])
+
+                if self.ctx.relative_dist:
+                    if distances[0,1] > 0: 
+                        self.weights[vector_id] += (np.divide(distances[0,1], distances[j,1]) * self.ctx.q_lambda * qvr)
+                    else:
+                        self.weights[vector_id] += (np.divide(0.001, distances[j,1]) * self.ctx.q_lambda * qvr)
+                else:
+                    self.weights[vector_id] += self.ctx.q_lambda * qvr
+
+        print("weights after: " , self.weights)
+        print("mean of weights after: ", np.mean(self.weights))
+        print("max of weights after: ", np.max(self.weights))
+        
+        # Close qhist fle
+        self._close_file(self.qhist_handle_read)
+
+        # Open weights file (write)
+        self._open_file('weights', 'wb')
+
+        # Write weights
+        self.weights_handle_write.write(self.weights)
+
+        # Close weights file
+        self._close_file(self.weights_handle_write)
+
+
+    # ----------------------------------------------------------------------------------------------------------------------------------------
     # Uses transposed file. Initializes boundary values such that cells are equally populated.
     def _init_boundaries(self):
 
@@ -268,7 +376,7 @@ class VAQIndex:
         block_count = 0
 
         # Open vaqfile -> write handle
-        self._open_file('wb')
+        self._open_file('vaq', 'wb')
 
         # Loop over tp blocks (i.e. loop over dimensions)
         for block in tp_gene:
@@ -320,6 +428,19 @@ class VAQIndex:
                     break
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
+    # Gives (num_vectors, 1) block of vaq_index; all data for a single dimension.    
+    def generate_vaq_block_mem(self, start_offset=0):
+
+        block_idx = start_offset
+
+        # Reading a column (dimension) of VAQ index from in-memory self self.vaqdata. 
+        while block_idx < self.ctx.num_dimensions:
+            
+            # yield self.vaqdata[:,block_idx].reshape((self.ctx.num_vectors, 1))
+            yield self.vaqdata[:,block_idx].reshape(self.ctx.num_vectors,1)
+            block_idx += 1
+    
+    # ----------------------------------------------------------------------------------------------------------------------------------------
     def _save_vaq_vars(self):
         np.savez(os.path.join(self.ctx.path, '') + self.ctx.fname + '.vaqvars', 
                  CELLS=self.ctx.cells, BOUNDARY_VALS=self.ctx.boundary_vals)
@@ -347,8 +468,12 @@ class VAQIndex:
             return hits[0]
     
     # ----------------------------------------------------------------------------------------------------------------------------------------
-    def _load_vaqfile(self):
-        pass
+    def _load_vaqdata(self):
+        data = np.fromfile(file=self.full_vaq_fname, count=-1, dtype=np.uint8)
+        self.vaqdata = np.reshape(data,(self.ctx.num_vectors, self.ctx.num_dimensions), order="F")
+        print()
+        print("IN-MEMORY VAQ PROCESSING SELECTED!")
+        print()
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
     def build(self):
@@ -358,6 +483,10 @@ class VAQIndex:
 
         # Bit allocation (covers uniform + non-uniform)
         self._allocate_bits()
+
+        # Assign weights (only if using qhist)
+        if self.ctx.use_qhist:
+            self._assign_weights()
 
         # Init boundary values
         self._init_boundaries()
@@ -371,6 +500,10 @@ class VAQIndex:
 
         # Create vaqfile
         self._create_vaqfile()
+
+        # For mode F, if in-memory VAQ requested, load it
+        if (self.ctx.mode == 'F') and (self.ctx.inmem_vaqdata):
+            self._load_vaqdata()
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
     def load(self):

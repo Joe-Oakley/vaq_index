@@ -76,7 +76,9 @@ class DataSet:
             self.ctx.dim_means = np.add(self.ctx.dim_means, dim_sums)
 
         self._close_file()
-        self.ctx.dim_means = np.divide(self.ctx.dim_means, self.ctx.num_blocks) # No longer casting to np.float32
+        # self.ctx.dim_means = np.divide(self.ctx.dim_means, self.ctx.num_blocks) # No longer casting to np.float32
+        self.ctx.dim_means = np.divide(self.ctx.dim_means, self.ctx.num_blocks).astype(np.float32) # Oh yes it did
+        
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
     def _calc_cov_matrix(self):
@@ -101,7 +103,8 @@ class DataSet:
 
         self._close_file()
 
-        self.ctx.cov_matrix = np.divide(self.ctx.cov_matrix, self.ctx.num_blocks)
+        # self.ctx.cov_matrix = np.divide(self.ctx.cov_matrix, self.ctx.num_blocks)
+        self.ctx.cov_matrix = np.divide(self.ctx.cov_matrix, self.ctx.num_blocks).astype(np.float32)
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
     def _calc_transform_matrix(self):

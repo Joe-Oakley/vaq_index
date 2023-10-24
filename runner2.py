@@ -27,9 +27,10 @@ def main():
     # Params common across datasets
     #------------------------------
     # Todo: Add Rustam's argparse in this script
-    mode                    = 'Q'
+    mode                    = 'F'
+    create_qhist            = True
     use_qhist               = False
-    query_k                 = 5
+    query_k                 = 10
     query_fname             = None
     word_size               = 4
     big_endian              = False
@@ -38,6 +39,8 @@ def main():
     non_uniform_bit_alloc   = True
     design_boundaries       = True
     dual_phase              = True
+    inmem_vaqdata           = True
+    relative_dist           = False
     
     #------------------------------
     # Dataset-specific params
@@ -72,10 +75,10 @@ def main():
         exit(1)
 
     # Instantiate session and commence run
-    session = QSession(path=path, fname=fname, mode=mode, use_qhist=use_qhist, query_k=query_k, query_fname=query_fname, \
+    session = QSession(path=path, fname=fname, mode=mode, create_qhist=create_qhist, use_qhist=use_qhist, query_k=query_k, query_fname=query_fname, \
         num_vectors=num_vectors, num_dimensions=num_dimensions, num_blocks=num_blocks, word_size=word_size, \
         big_endian=big_endian, q_lambda=q_lambda, bit_budget=bit_budget, non_uniform_bit_alloc=non_uniform_bit_alloc, \
-        design_boundaries=design_boundaries, dual_phase=dual_phase)
+        design_boundaries=design_boundaries, dual_phase=dual_phase, inmem_vaqdata=inmem_vaqdata, relative_dist=relative_dist)
     
     session.run()
     

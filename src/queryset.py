@@ -1,5 +1,6 @@
 import numpy as np
 import os
+import timeit
 
 from qsession import QSession
 
@@ -12,6 +13,7 @@ class QuerySet:
         self.full_query_fname       = None
         self.full_res_fname         = None 
         self.full_metrics_fname     = None
+        self.full_qhist_fname       = None
 
         self.query_handle_read      = None
         self.query_handle_write     = None
@@ -19,6 +21,8 @@ class QuerySet:
         self.res_handle_write       = None
         self.metrics_handle_read    = None
         self.metrics_handle_write   = None
+        self.qhist_handle_read      = None
+        self.qhist_handle_write     = None
 
         # Can't initialize these until _open_query_file()
         self.Q              = None # Query set
@@ -62,6 +66,13 @@ class QuerySet:
                 self.metrics_handle_write = open(self.full_metrics_fname, mode=mode)
             else:
                 raise ValueError("Invalid mode selected: ", mode)
+        elif ftype == 'qhist':
+            if mode == 'rb':
+                self.qhist_handle_read = open(self.full_qhist_fname, mode=mode)
+            elif mode == 'wb':
+                self.qhist_handle_write = open(self.full_qhist_fname, mode=mode)
+            else:
+                raise ValueError("Invalid mode selected: ", mode)
         else:
             raise ValueError("Invalid ftype selected: ", mode)
 
@@ -80,6 +91,10 @@ class QuerySet:
             self.metrics_handle_read = None
         elif handle == self.metrics_handle_write:
             self.metrics_handle_write = None
+        elif handle == self.qhist_handle_read:
+            self.qhist_handle_read = None
+        elif handle == self.qhist_handle_write:
+            self.qhist_handle_write = None
         else:
             raise ValueError("Invalid handle given to _close_file().")
 
@@ -92,11 +107,13 @@ class QuerySet:
         if self.ctx.query_fname is not None:
             self.full_query_fname = os.path.join(self.ctx.path, '') + self.ctx.query_fname
             self.full_res_fname = os.path.join(self.ctx.path, '') + self.ctx.query_fname + '.res'
-            self.full_metrics_fname = os.path.join(self.ctx.path, '') + self.ctx.query_fname + '.met'            
+            self.full_metrics_fname = os.path.join(self.ctx.path, '') + self.ctx.query_fname + '.met'
+            self.full_qhist_fname = os.path.join(self.ctx.path, '') + self.ctx.query_fname + '.qhist'
         else:
             self.full_query_fname = os.path.join(self.ctx.path, '') + self.ctx.fname + '_qry'
             self.full_res_fname = os.path.join(self.ctx.path, '') + self.ctx.fname + '.res'
             self.full_metrics_fname = os.path.join(self.ctx.path, '') + self.ctx.fname + '.met'
+            self.full_qhist_fname = os.path.join(self.ctx.path, '') + self.ctx.fname + '.qhist'
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
     # Open query read handle -> read entire query file into memory, do byteswap if needed -> reshape to determine number of queries ->
@@ -194,10 +211,29 @@ class QuerySet:
         self.S2 = np.zeros((self.ctx.num_vectors,1), dtype=np.float32)
 
         # Set up VAQIndex generator (one block = one dimension)
-        vaq_gene = self.ctx.VAQ.generate_vaq_block()
+        if self.ctx.inmem_vaqdata:
+            vaq_gene = self.ctx.VAQ.generate_vaq_block_mem()
+        else:
+            vaq_gene = self.ctx.VAQ.generate_vaq_block()
         
         num_vectors_per_block = self.ctx.num_vectors_per_block
         num_blocks = self.ctx.num_blocks
+
+        # 21/10/2023    Create a boundary-distances arrays containing squared upper/lower bound distances from the query vector to 
+        #               each of the non-zero boundary_vals. This will be used below to avoid repeatedly calculating these distances 
+        #               when comparing the query to the vectors
+        calcdists_reft = timeit.default_timer()
+        
+        boundary_vals_wrapped = np.roll(self.ctx.boundary_vals,-1,0)
+        D1 = np.abs(np.subtract(boundary_vals_wrapped, self.q[:,None].ravel(), where=boundary_vals_wrapped!=0, out=np.zeros_like(boundary_vals_wrapped) )  )
+        D2 = np.abs(np.subtract(self.ctx.boundary_vals, self.q[:,None].ravel(), where=self.ctx.boundary_vals!=0, out=np.zeros_like(self.ctx.boundary_vals) )  )
+        D_MIN = np.square(np.minimum(D1,D2))
+        D_MAX = np.square(np.maximum(D1,D2))
+        
+        msg = 'Query : ' + str(query_idx) + ' Calc boundary LB/UB distances'
+        self.ctx.debug_timer('QuerySet._run_phase_one',calcdists_reft, msg, 1)
+        
+        dimloop_reft = timeit.default_timer()
 
         block_count = 0 # MATLAB j
         # Block/dimension loop
@@ -208,12 +244,7 @@ class QuerySet:
             # print("----------------------")
 
             cells_for_dim = self.ctx.cells[block_count]
-            # print("cells_for_dim Details : ",cells_for_dim.shape, cells_for_dim.dtype)
-            # print(cells_for_dim)
-            
             qj = self.q[block_count]
-            # print("qj Details : ",qj.shape, qj.dtype)
-            # print(qj)
 
             # Calculate R
             # R=min(find(q(j)<=B(2:CELLS(j)+1,j)))-1;
@@ -255,18 +286,25 @@ class QuerySet:
 
             for i in range(num_blocks): 
 
+                qblock_reft = timeit.default_timer()
+
                 # cset should be (num_vectors_per_block,1)
                 cset = CSET[i*num_vectors_per_block: (i+1)*num_vectors_per_block]
 
                 # self.S1[i*num_vectors_per_block: (i+1)*num_vectors_per_block] = np.square(np.min(np.abs(qj_rep - self.boundary_vals[cset+1, block_count]), np.abs(qj_rep - self.boundary_vals[cset, block_count]))) # ORIG
-                d1 = np.abs(qj_rep - self.ctx.boundary_vals[cset+1, block_count])
-                d2 = np.abs(qj_rep - self.ctx.boundary_vals[cset, block_count]) 
-                self.S1[i*num_vectors_per_block: (i+1)*num_vectors_per_block] = np.square(np.minimum(d1,d2))
-                self.S2[i*num_vectors_per_block: (i+1)*num_vectors_per_block] = np.square(np.maximum(d1,d2))                
+                
+                # d1 = np.abs(qj_rep - self.ctx.boundary_vals[cset+1, block_count])
+                # d2 = np.abs(qj_rep - self.ctx.boundary_vals[cset, block_count]) 
+                # self.S1[i*num_vectors_per_block: (i+1)*num_vectors_per_block] = np.square(np.minimum(d1,d2))
+                # self.S2[i*num_vectors_per_block: (i+1)*num_vectors_per_block] = np.square(np.maximum(d1,d2))                
 
-             # Calculate x x=(R~=CSET); x will be (num_vectors, 1)
+                # 21/10/2023    Use cset values to index into the distances array created for the query
+                self.S1[i*num_vectors_per_block: (i+1)*num_vectors_per_block] = D_MIN[cset,block_count]
+                self.S2[i*num_vectors_per_block: (i+1)*num_vectors_per_block] = D_MAX[cset,block_count]
 
-            # print()
+                # msg = 'Query ' + str(query_idx) + ' Dim ' + str(block_count) + ' Chunk ' + str(i) + ' Populating S1/S2 chunk'
+                # self.ctx.debug_timer('QuerySet._run_phase_one', qblock_reft, msg, 2)
+
             x = np.logical_not(CSET == R).astype(np.int32)
 
             # Calculate L (lower bound): L=L+x.*S1;
@@ -284,18 +322,31 @@ class QuerySet:
 
         # End block loop
 
+        msg = 'Query : ' + str(query_idx) + ' Dimensions block'        
+        self.ctx.debug_timer('QuerySet._run_phase_one',dimloop_reft, msg, 1)
+
+        elimcount_reft = timeit.default_timer()
+
         # Elim counting
         elim = 0
         for i in range(self.ctx.num_vectors):
             if self.L[i] <= self.UP[self.ctx.query_k - 1]:
                 # Might be a more efficient way of doing this?
-                # UP_appended_sorted = np.sort(np.append(self.UP, self.U(i))) # Diff variable names than MATLAB
+
                 UP_appended_sorted = np.sort(np.append(self.UP, self.U[i])) # Diff variable names than MATLAB
                 self.UP = UP_appended_sorted[0:self.ctx.query_k]
+
+                # sort_idx = np.searchsorted(self.UP, self.U[i])
+                # self.UP = np.insert(self.UP, sort_idx, self.U[i])
+                # self.UP[:-1]
+
             else:
                 elim += 1
 
         self.first_stage[query_idx] = elim
+
+        msg = 'Query : ' + str(query_idx) + ' Elim Counting'        
+        self.ctx.debug_timer('QuerySet._run_phase_one',elimcount_reft, msg, 1)
 
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
@@ -354,11 +405,27 @@ class QuerySet:
     # ----------------------------------------------------------------------------------------------------------------------------------------
     def _run_queries(self):
 
-        self._open_file('res', 'wb') 
+        self._open_file('res', 'wb')
+        
+        if self.ctx.create_qhist:
+            self._open_file('qhist', 'wb') # First write num_queries, then a chunk of (2k+4) words for each query.    
+
+            # Write num_queries at the start of the qhist file
+            self.qhist_handle_write.write(np.uint32(self.num_queries))
+
         # Loop over all queries
         for i in range(self.num_queries):
+
+            reft = timeit.default_timer()
+
             self._run_phase_one(i)
+            msg = 'Query : ' + str(i) + ' Phase 1 duration'
+            self.ctx.debug_timer('QuerySet._run_queries',reft, msg)
+            
+            reft = timeit.default_timer()
             self._run_phase_two(i)
+            msg = 'Query : ' + str(i) + ' Phase 2 duration'            
+            self.ctx.debug_timer('QuerySet._run_queries', reft, msg)
 
             # Save self.V and self.ANS for current query
             self.res_handle_write.write(self.V)
@@ -374,7 +441,21 @@ class QuerySet:
             print("ANS")
             print(self.ANS)
 
+            # Write Query ID, query_k, phase 1 elims, phase 2 visits
+            if self.ctx.create_qhist:
+                self.qhist_handle_write.write(np.uint32(i))
+                self.qhist_handle_write.write(np.uint32(self.ctx.query_k))
+                self.qhist_handle_write.write(np.uint32(self.first_stage[i]))
+                self.qhist_handle_write.write(np.uint32(self.second_stage[i]))
+
+                # Write k pairs of (NN vector ID, Euclidean distance to query point)
+                for j in range(self.ctx.query_k):
+                    self.qhist_handle_write.write(np.float32(self.V[j])) # uint32 would be ideal, but doing float for now for reading
+                    self.qhist_handle_write.write(np.float32(self.ANS[j]))
+
         self._close_file(self.res_handle_write)
+        if self.ctx.create_qhist:
+            self._close_file(self.qhist_handle_write)
         
         # Save overall query metrics
         self._open_file('met', 'wb')

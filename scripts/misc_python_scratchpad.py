@@ -19,7 +19,14 @@ import math
 # x = np.logical_not(test_np == 5).astype(np.int32)
 # print(x)
 
-test_np = np.array([1,2,3,4])
+test_np = np.array([1,2,3,4], dtype=np.float32)
+
+# print(test_np)
+# test_np_appended = np.append(test_np, 5)
+# print(test_np_appended)
+
+val = 2.5
+sort_idx = np.searchsorted(test_np, val)
+print(sort_idx)
+test_np = np.insert(test_np, sort_idx, val)
 print(test_np)
-test_np_appended = np.append(test_np, 5)
-print(test_np_appended)
