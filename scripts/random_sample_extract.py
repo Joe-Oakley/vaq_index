@@ -159,7 +159,7 @@ def main():
     fname = 'sift1m'    
     num_vectors = 1000000
     num_dimensions = 128
-    samples = 100
+    samples = 10
     
     dataset = DataSet(path, fname, num_vectors, num_dimensions, samples)
     dataset.process()

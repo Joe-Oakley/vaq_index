@@ -12,7 +12,7 @@ class VAQIndex:
     def __init__(self, ctx: QSession = None):
         self.ctx                  = ctx
         self.full_vaq_fname       = None 
-        self.full_qhist_fname     = None # Should this be in qsession?
+        # self.full_qhist_fname     = None # Should this be in qsession?
         self.full_weights_fname   = None # Writing weights will be useful when updating VAQ later.
         self.vaq_handle_read      = None
         self.vaq_handle_write     = None
@@ -40,9 +40,9 @@ class VAQIndex:
                 raise ValueError("Invalid mode selected: ", mode)
         elif ftype == 'qhist':
             if mode == 'rb':
-                self.qhist_handle_read = open(self.full_qhist_fname, mode=mode)
+                self.qhist_handle_read = open(self.ctx.qhist_fname, mode=mode)
             elif mode == 'wb':
-                self.qhist_handle_write = open(self.full_qhist_fname, mode=mode)
+                self.qhist_handle_write = open(self.ctx.qhist_fname, mode=mode)
             else:
                 raise ValueError("Invalid mode selected: ", mode)
         elif ftype == 'weights':
@@ -55,25 +55,59 @@ class VAQIndex:
         else:
             raise ValueError("Invalid ftype selected: ", ftype)
 
+    # # ----------------------------------------------------------------------------------------------------------------------------------------
+    # def _close_file(self, handle):
+
+    #     if handle == self.vaq_handle_read:
+    #         self.vaq_handle_read = None
+    #     elif handle == self.vaq_handle_write:
+    #         self.vaq_handle_write = None
+    #     elif handle == self.qhist_handle_read:
+    #         self.qhist_handle_read = None
+    #     elif handle == self.qhist_handle_write:
+    #         self.qhist_handle_write = None
+    #     elif handle == self.weights_handle_read:
+    #         self.weights_handle_read = None
+    #     elif handle == self.weights_handle_write:
+    #         self.weights_handle_write = None
+    #     else:
+    #         raise ValueError("Invalid handle given to _close_file().")
+
+    #     handle.close()
+
     # ----------------------------------------------------------------------------------------------------------------------------------------
-    def _close_file(self, handle):
+    def _close_file(self, ftype, mode): # ftypes: vaq, qhist, weights. modes: 'rb', 'wb'
 
-        if handle == self.vaq_handle_read:
-            self.vaq_handle_read = None
-        elif handle == self.vaq_handle_write:
-            self.vaq_handle_write = None
-        elif handle == self.qhist_handle_read:
-            self.qhist_handle_read = None
-        elif handle == self.qhist_handle_write:
-            self.qhist_handle_write = None
-        elif handle == self.weights_handle_read:
-            self.weights_handle_read = None
-        elif handle == self.weights_handle_write:
-            self.weights_handle_write = None
+        if ftype == 'vaq':
+            if mode == 'rb':
+                self.vaq_handle_read.close()
+                self.vaq_handle_read = None
+            elif mode == 'wb':
+                self.vaq_handle_write.close()
+                self.vaq_handle_write = None
+            else:
+                raise ValueError("Invalid mode selected: ", mode)
+        elif ftype == 'qhist':
+            if mode == 'rb':
+                self.qhist_handle_read.close()
+                self.qhist_handle_read = None
+            elif mode == 'wb':
+                self.qhist_handle_write.close()
+                self.qhist_handle_write = None
+            else:
+                raise ValueError("Invalid mode selected: ", mode)
+        elif ftype == 'weights':
+            if mode == 'rb':
+                self.weights_handle_read.close()
+                self.weights_handle_read = None
+                
+            if mode == 'wb':
+                self.weights_handle_write.close()
+                self.weights_handle_write = None
+            else:
+                raise ValueError("Invalid mode selected: ", mode)
         else:
-            raise ValueError("Invalid handle given to _close_file().")
-
-        handle.close()
+            raise ValueError("Invalid ftype selected: ", ftype)
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
     def _initialise(self):
@@ -88,12 +122,12 @@ class VAQIndex:
         if self.ctx.mode == 'Q':
             self._load_vaq_vars()
 
-            # If in-memory vaq file, load it
+            # If in-memory vaq file requested for mode Q, load it now.
+            # N.B., for mode F it will be loaded after build phase (later)
             if self.ctx.inmem_vaqdata: # Careful which mode you're in?
                 self._load_vaqdata()
 
         if self.ctx.use_qhist:
-            self.full_qhist_fname = os.path.join(self.ctx.path, '') + self.ctx.fname + '.qhist'
             self.full_weights_fname = os.path.join(self.ctx.path, '') + self.ctx.fname + '.weights'
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
@@ -207,7 +241,8 @@ class VAQIndex:
         print("max of weights after: ", np.max(self.weights))
         
         # Close qhist fle
-        self._close_file(self.qhist_handle_read)
+        # self._close_file(self.qhist_handle_read)
+        self._close_file('qhist', 'rb')
 
         # Open weights file (write)
         self._open_file('weights', 'wb')
@@ -216,7 +251,8 @@ class VAQIndex:
         self.weights_handle_write.write(self.weights)
 
         # Close weights file
-        self._close_file(self.weights_handle_write)
+        # self._close_file(self.weights_handle_write)
+        self._close_file('weights', 'wb')
 
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
@@ -288,13 +324,20 @@ class VAQIndex:
 
             # Experiment 1
             # r, c = self._lloyd(block, self.boundary_vals[0:cells_for_dim+1, block_count])   
-            r, c = self._lloyd(block, self.ctx.boundary_vals[0:cells_for_dim, block_count])
+
+            if self.ctx.use_qhist:
+                # Doesn't work yet! Probably also needs cells_for_dim+1?
+                # r, c = self._weighted_lloyd(block, self.ctx.boundary_vals[0:cells_for_dim+1, block_count])
+                r, c = self._lloyd(block, self.ctx.boundary_vals[0:cells_for_dim+1, block_count])
+            else:
+                # r, c = self._lloyd(block, self.ctx.boundary_vals[0:cells_for_dim, block_count])
+                r, c = self._lloyd(block, self.ctx.boundary_vals[0:cells_for_dim+1, block_count])
 
             # Set boundary values to designed boundary values. Not using r; might stop returning it.
 
             # Experiment 1
-            # self.boundary_vals[0:cells_for_dim+1, block_count] = c
-            self.ctx.boundary_vals[0:cells_for_dim, block_count] = c
+            self.ctx.boundary_vals[0:cells_for_dim+1, block_count] = c
+            # self.ctx.boundary_vals[0:cells_for_dim, block_count] = c
 
             # Increment block_count - this was missing
             block_count += 1
@@ -362,6 +405,81 @@ class VAQIndex:
             delta = delta_new
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
+    def _weighted_lloyd(self, block, boundary_vals_in):
+
+        # Inputs: 
+        # TSET -> block (num_vectors, 1)
+        # B(1:CELLS(i)+1,i) -> self.boundary_vals[0:cells_for_dim+1, block_count].
+        # First param is the whole unsorted block. Also gets all initialized boundary values for current dim.
+        # Dimensions of boundary_vals_in: (cells(i)+1, 1)
+
+        # Init variables
+        delta = np.inf
+        stop = 0.001
+        c = boundary_vals_in
+        M1 = np.min(boundary_vals_in)
+        M2 = np.max(boundary_vals_in)
+        num_boundary_vals = np.shape(boundary_vals_in)[0]
+        r = np.zeros(num_boundary_vals, dtype=np.float32)
+
+        print("self.weights: ", self.weights)
+
+        num_lloyd_iterations = 0
+        while True:
+            delta_new = np.float32(0)
+            num_lloyd_iterations += 1
+
+            # print("_lloyd while true loop")
+            # print()
+
+            # Loop over intervals; careful with indices
+            for i in range(num_boundary_vals - 1):
+
+                # print("    i loop : ", i)                
+
+                # Find values in block between boundary values; np.where?
+                idxs = np.where(np.logical_and(block >= c[i], block < c[i + 1]))[0]
+
+                X_i = block[idxs]
+
+                # print("idxs: ", idxs)
+                # print("X_i type: ", type(X_i))
+                # print("X_i shape: ", np.shape(X_i))
+                # print("self.weights type: ", type(self.weights))
+                # print("self.weights shape: ", np.shape(self.weights))
+
+                W_i = self.weights[idxs]
+
+                # If any values found
+                if np.shape(X_i)[0] > 0:
+                    # r[i] = np.mean(X_i) # Change this 
+                    r[i] = np.divide(np.sum(np.multiply(W_i, X_i)), np.sum(W_i))
+                else:
+                    r[i] = np.random.rand(1) * (M2 - M1) + M1
+
+                # Add representation error over current interval to delta_new
+                delta_new += np.sum(np.square(np.multiply(W_i, X_i) - r[i]))
+
+            # Sort representative values - todo: sorting algorithm selection
+            r = np.sort(r)
+
+            # print()
+
+            # Update boundary values based on representative values
+            for j in range(1, num_boundary_vals):  # MATLAB has a -1 here... don't think we need?
+
+                # print("    j loop : ", j)                
+
+                c[j] = (r[j - 1] + r[j]) / 2
+
+            # Stopping condition check
+            # print("((delta - delta_new)/delta) -> ", ((delta - delta_new)/delta))
+            if ((delta - delta_new) / delta) < stop:
+                print("Number of Lloyd's iterations: ", str(num_lloyd_iterations))
+                return r, c
+            delta = delta_new
+    
+    # ----------------------------------------------------------------------------------------------------------------------------------------
     # Operates on the transposed datafile. 
     # Writes the vaqfile -> use vaq_handle_write     
     def _create_vaqfile(self):
@@ -403,9 +521,12 @@ class VAQIndex:
 
             block_count += 1
 
+        print(self.ctx.boundary_vals[0,:])
+        
         # Close vaqfile
-        self._close_file(self.vaq_handle_write)
-
+        # self._close_file(self.vaq_handle_write)
+        self._close_file('vaq', 'wb')
+    
     # ----------------------------------------------------------------------------------------------------------------------------------------
     # Gives (num_vectors, 1) block of vaq_index; all data for a single dimension.    
     def generate_vaq_block(self, start_offset=0):
@@ -421,7 +542,8 @@ class VAQIndex:
                 block = np.fromfile(file=f, count=self.ctx.tp_num_words_per_block, dtype=np.uint8)
 
                 if block.size > 0:
-                    block = np.reshape(block, (self.ctx.num_vectors, 1))
+                    # block = np.reshape(block, (self.ctx.num_vectors, 1))
+                    block = np.reshape(block, (self.ctx.num_vectors))
                     yield block
                     block_idx += 1
                 else:

@@ -36,23 +36,47 @@ class TransformedDataSet:
             else:
                 raise ValueError("Invalid mode selected: ", mode)
         else:
-            raise ValueError("Invalid ftype selected: ", mode)
+            raise ValueError("Invalid ftype selected: ", ftype)
+
+    # # ----------------------------------------------------------------------------------------------------------------------------------------
+    # def _close_file(self, handle):
+
+    #     if handle == self.tf_handle_read:
+    #         self.tf_handle_read = None
+    #     elif handle == self.tf_handle_write:
+    #         self.tf_handle_write = None
+    #     elif handle == self.tp_handle_read:
+    #         self.tp_handle_read = None
+    #     elif handle == self.tp_handle_write:
+    #         self.tp_handle_write = None
+    #     else:
+    #         raise ValueError("Invalid handle given to _close_file().")
+
+    #     handle.close()
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
-    def _close_file(self, handle):
+    def _close_file(self, ftype, mode):
 
-        if handle == self.tf_handle_read:
-            self.tf_handle_read = None
-        elif handle == self.tf_handle_write:
-            self.tf_handle_write = None
-        elif handle == self.tp_handle_read:
-            self.tp_handle_read = None
-        elif handle == self.tp_handle_write:
-            self.tp_handle_write = None
+        if ftype == 'tf':
+            if mode == 'rb':
+                self.tf_handle_read.close()
+                self.tf_handle_read = None
+            elif mode == 'wb':
+                self.tf_handle_write.close()
+                self.tf_handle_write = None
+            else:
+                raise ValueError("Invalid mode selected: ", mode)
+        elif ftype == 'tp':
+            if mode == 'rb':
+                self.tp_handle_write.close()
+                self.tp_handle_read = None
+            elif mode == 'wb':
+                self.tp_handle_write.close()
+                self.tp_handle_write = None
+            else:
+                raise ValueError("Invalid mode selected: ", mode)
         else:
-            raise ValueError("Invalid handle given to _close_file().")
-
-        handle.close()
+            raise ValueError("Invalid ftype selected: ", ftype)
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
     def _initialise(self):
@@ -122,7 +146,7 @@ class TransformedDataSet:
             Z = np.matmul(Y, self.ctx.transform_matrix)
             self.tf_handle_write.write(Z)
 
-        self._close_file(self.tf_handle_write)
+        self._close_file('tf', 'wb')
 
         print("Finished _build_tf!")
 
@@ -177,7 +201,7 @@ class TransformedDataSet:
             write_count += 1
 
         # Close tp handle write
-        self._close_file(self.tp_handle_write)
+        self._close_file('tp', 'wb')
 
         print("Finished _build_tp!") 
 

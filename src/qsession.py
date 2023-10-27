@@ -9,7 +9,7 @@ class QSession:
 
     DEBUG = True
     
-    def __init__(self, path, fname, mode = "B", create_qhist=True, use_qhist=True, query_k=2, query_fname=None, num_vectors=None, num_dimensions=None, num_blocks=1, word_size=4, big_endian=False, \
+    def __init__(self, path, fname, mode = "B", create_qhist=True, use_qhist=True, query_k=2, query_fname=None, qhist_fname=None, num_vectors=None, num_dimensions=None, num_blocks=1, word_size=4, big_endian=False, \
                  q_lambda=1, bit_budget=0, non_uniform_bit_alloc=True, design_boundaries=True, dual_phase=True, inmem_vaqdata=False, relative_dist = True):
         
         self.path                   = path
@@ -19,6 +19,7 @@ class QSession:
         self.use_qhist              = use_qhist
         self.query_k                = query_k
         self.query_fname            = query_fname
+        self.qhist_fname            = qhist_fname
         self.num_vectors            = num_vectors
         self.num_dimensions         = num_dimensions
         self.num_blocks             = num_blocks
@@ -44,6 +45,8 @@ class QSession:
         self.tf_num_words_per_block = 0
         self.tf_num_vectors_per_block = 0
         self.tp_num_words_per_block = 0
+        
+        self.qhist_fname = os.path.join(self.path, '') + self.fname + '.qhist'
         
         # Variable arrays used in > one class
         self.dim_means = np.zeros((1, self.num_dimensions), dtype=np.float32)
