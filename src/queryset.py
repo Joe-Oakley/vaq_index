@@ -522,7 +522,10 @@ class QuerySet:
         R_cells = np.zeros(self.ctx.num_dimensions, dtype=np.uint8)
         for i in range(self.ctx.num_dimensions):
             # R_cells[i] = np.squeeze( np.where(final_min_target_cells[i] == self.ctx.boundary_vals[0:self.ctx.cells[i]+1,i])[0]  )
-            R_cells[i] = np.where(final_min_target_cells[i] == self.ctx.boundary_vals[0:self.ctx.cells[i]+1,i])[0] - 1        
+            # R_cells[i] = np.where(final_min_target_cells[i] == self.ctx.boundary_vals[0:self.ctx.cells[i]+1,i])[0] - 1
+
+            # Changed to [1:cells_for_dim+1] to be consistent with run_phase_one. Returns left boundary index of the cell you're in.
+            R_cells[i] = np.where(final_min_target_cells[i] == self.ctx.boundary_vals[1:self.ctx.cells[i]+1,i])[0]        
 
             # # Debugging when investigating boundary selection
             # print(self.q)
