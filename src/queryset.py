@@ -400,7 +400,7 @@ class QuerySet:
             # In MATLAB, we only repmat NO_OF_BLOCKS times. This means that the following happens (num_vectors/num_blocks) = num_vectors_per_block times.
             # Here, I'm tiling it num_vectors_per_block times to create a (num_vectors_per_block, 1). 
             # The loop below will thus only happen num_blocks times.
-            qj_rep = np.tile(self.q[block_count], (num_vectors_per_block, 1))
+            # qj_rep = np.tile(self.q[block_count], (num_vectors_per_block, 1))
 
             for i in range(num_blocks): 
 
@@ -508,8 +508,8 @@ class QuerySet:
         boundary_vals_wrapped = np.roll(self.ctx.boundary_vals,-1,0)
         D1 = np.abs(np.subtract(boundary_vals_wrapped, self.q[:,None].ravel(), where=boundary_vals_wrapped!=0, out=np.zeros_like(boundary_vals_wrapped) )  )
         D2 = np.abs(np.subtract(self.ctx.boundary_vals, self.q[:,None].ravel(), where=self.ctx.boundary_vals!=0, out=np.zeros_like(self.ctx.boundary_vals) )  )
-        D_MIN = np.square(np.minimum(D1,D2))
-        D_MAX = np.square(np.maximum(D1,D2))
+        D_MIN = np.square(np.minimum(D1,D2)) # Same dims as self.ctx.boundary_vals.
+        D_MAX = np.square(np.maximum(D1,D2)) # Same dims as self.ctx.boundary_vals.
         
         msg = 'Query : ' + str(query_idx) + ' Calc boundary LB/UB distances'
         self.ctx.debug_timer('QuerySet._run_phase_one',calcdists_reft, msg, 1)
@@ -517,7 +517,7 @@ class QuerySet:
         # Calculate R_cells
         # 22.10.2023: Objective is to produce a (128,) array containing index positions of selected boundary value for each dimension
         min_target_cells = np.min( np.where( ( self.q <= self.ctx.boundary_vals ) & ( self.ctx.boundary_vals != 0), self.ctx.boundary_vals, np.inf) , axis=0)
-        final_min_target_cells = np.where(min_target_cells !=np.inf, min_target_cells, np.max(self.ctx.boundary_vals, axis=0))
+        # final_min_target_cells = np.where(min_target_cells !=np.inf, min_target_cells, np.max(self.ctx.boundary_vals, axis=0))
 
         R_cells = np.zeros(self.ctx.num_dimensions, dtype=np.uint8)
         for i in range(self.ctx.num_dimensions):
@@ -525,7 +525,12 @@ class QuerySet:
             # R_cells[i] = np.where(final_min_target_cells[i] == self.ctx.boundary_vals[0:self.ctx.cells[i]+1,i])[0] - 1
 
             # Changed to [1:cells_for_dim+1] to be consistent with run_phase_one. Returns left boundary index of the cell you're in.
-            R_cells[i] = np.where(final_min_target_cells[i] == self.ctx.boundary_vals[1:self.ctx.cells[i]+1,i])[0]        
+            
+            # R_cells[i] = np.where(final_min_target_cells[i] == self.ctx.boundary_vals[1:self.ctx.cells[i]+1,i])[0]     
+            if min_target_cells[i] == np.inf:
+                R_cells[i] = self.ctx.cells[i]
+            else:
+                R_cells[i] = np.where(min_target_cells[i] == self.ctx.boundary_vals[1:self.ctx.cells[i]+1,i])[0]   
 
             # # Debugging when investigating boundary selection
             # print(self.q)
@@ -546,11 +551,12 @@ class QuerySet:
             
             qblock_reft = timeit.default_timer()
             
+            # vaqdata is (num_vectors, num_dimensions)
             RSET = self.ctx.VAQ.vaqdata[(blockno*num_vectors_per_block):((blockno+1)*num_vectors_per_block), :]
             x = np.logical_not(RSET == R_cells).astype(np.int32)    
             
             # 23/10/2023    Use RSET values to index into the distances array created for the query
-            dmin = np.take_along_axis(D_MIN, RSET, axis=0)
+            dmin = np.take_along_axis(D_MIN, RSET, axis=0) # Uses RSET values to index into D_MIN. dmin same shape as RSET, but contains distances.
             dmax = np.take_along_axis(D_MAX, RSET, axis=0)
     
             lbounds = np.multiply(x, dmin)
