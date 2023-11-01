@@ -1,5 +1,4 @@
 import numpy as np
-from numpy import linalg as LA
 import os
 
 from qsession import QSession
@@ -185,13 +184,12 @@ class TransformedDataSet:
 
             XX = np.zeros(self.ctx.num_vectors, dtype=np.float32)
 
-            # Init generator
+            # Init generator + loop var
             gene_tf = self.generate_tf_block()
-
             block_count = 0
-            # Generator block loop
+
             for X in gene_tf:
-                # Set a row of XX to some function of block
+                
                 XX[(block_count * self.ctx.tf_num_vectors_per_block):((block_count + 1) * self.ctx.tf_num_vectors_per_block)] = X[:,i]  
                 block_count += 1
 

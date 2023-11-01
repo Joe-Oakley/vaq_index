@@ -13,7 +13,6 @@ class QuerySet:
         self.full_query_fname       = None
         self.full_res_fname         = None 
         self.full_metrics_fname     = None
-        # self.full_qhist_fname       = None
 
         self.query_handle_read      = None
         self.query_handle_write     = None
@@ -156,25 +155,24 @@ class QuerySet:
             self.full_metrics_fname = os.path.join(self.ctx.path, '') + self.ctx.fname + '.met'
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
-    # Open query read handle -> read entire query file into memory, do byteswap if needed -> reshape to determine number of queries ->
-    # set variables. Build will call this function followed by _transform_query_file()
-    # 6Oct; Don't need to worry about endianness, but they will have IDs, so make sure we strip.
+    # Build will call this function followed by _transform_query_file()
     def _open_query_file(self):
 
-        print("****************************************")
-        print("In _open_query_file()")
-        print("****************************************")
+        # print("****************************************")
+        # print("In _open_query_file()")
+        # print("****************************************")
 
         # Read all queries into memory at once. Don't know how many; use -1 to get number of queries.
         self._open_file('qry', 'rb')
 
+        # Should have run change_ends.py before this, so endianness shouldn't be a factor.
         if self.ctx.big_endian:
             queries = np.fromfile(file=self.query_handle_read, count=-1, dtype=np.float32).byteswap(inplace=True)
         else:
             queries = np.fromfile(file=self.query_handle_read, count=-1, dtype=np.float32)
 
+        # Reshape and trim identifiers
         print("queries shape before reshape + trim identifiers: ", np.shape(queries))
-        
         queries = np.reshape(queries, (-1, self.ctx.num_dimensions+1), order="C")
         queries = np.delete(queries, 0, 1)
         print("queries shape after reshape + trim identifiers: ", np.shape(queries))
@@ -186,29 +184,18 @@ class QuerySet:
         self.second_stage = np.zeros((self.num_queries), dtype=np.uint32)        
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
+    # Perform transform on self.Q: Q=(Q-repmat(DATA_MEAN',QUERY_FILE_SIZE,1))*KLT';
     def _transform_query_file(self):
 
-        print("****************************************")
-        print("In _transform_query_file()")
-        print("****************************************")
-
-        # Perform transform on self.Q: Q=(Q-repmat(DATA_MEAN',QUERY_FILE_SIZE,1))*KLT';
-        # Q is (num_queries, num+dims). dim_means is (num_dims, 1), so transposed is (1,num_dims)
-        # repmat copies a (1,num_dims) across num_queries rows and 1 column -> makes it (num_queries, num_dims) to match Q.
-        # multiply by KLT', which is still (num_dims,num_dims)
-        # repmat code example: rep_mean = np.tile(self.dim_means, (1, self.num_vectors_per_block))
+        # print("****************************************")
+        # print("In _transform_query_file()")
+        # print("****************************************")
+        
         dim0_pretransform = self.Q[:,0].copy()
         q0_pretransform = self.Q[0,:].copy()
-
-        # The commented line + block below both aim to apply the transformation to the queries. The commented line is an exact match to 
-        # the MATLAB code. The block below was written to mirror the transformation done to the main dataset in transformed.py (with an
-        # additional transpose to Q). Not sure which is the best option, but the choice will have repercussions, e.g. L191 dimensions 
-        # need to be swapped.
-
-        # self.Q = np.matmul((self.Q - np.tile(self.dim_means.T, (self.num_queries, 1))), self.transform_matrix.T) # ORIGINAL
         
-        rep_mean = np.tile(self.ctx.dim_means, (self.num_queries,1)) 
-        X = self.Q  
+        rep_mean = np.tile(self.ctx.dim_means, (self.num_queries,1)) # (num_queries, num_dims)
+        X = self.Q # (num_queries, num_dims) 
         Y = np.subtract(X, rep_mean)
         Z = np.matmul(Y,self.ctx.transform_matrix)
         self.Q = Z
@@ -247,13 +234,12 @@ class QuerySet:
             raise ValueError("Invalid mode selected: ", mode)
 
         # Close file
-        # self._close_file(self.qhist_handle_append)
         self._close_file('qhist', 'ab')
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
-    def _write_res_info(self): # Called once per query. 
     # Res file size (bytes) = word_size * 2 (i.e. V, ANS) * self.ctx.query_k * self.num_queries.
-        
+    def _write_res_info(self): # Called once per query. 
+    
         # Open res file (mode append)
         self._open_file('res', 'ab')
 
@@ -280,8 +266,7 @@ class QuerySet:
         print(self.ANS)
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
-    def _write_metrics_info(self): # For all queries.
-    # Metrics file size = 
+    def _write_metrics_info(self): # Write metrics info for all queries.
 
         # Open metrics file
         self._open_file('met', 'wb')
@@ -291,7 +276,6 @@ class QuerySet:
         self.metrics_handle_write.write(self.second_stage) # (num_queries, 1), uint32
 
         # Close metrics file
-        # self._close_file(self.metrics_handle_write)
         self._close_file('met', 'wb')
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
@@ -308,7 +292,6 @@ class QuerySet:
         print()
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
-    # May have a separate version of this function for the case where the entire VAQIndex fits into memory.
     # This function will be called repeatedly in a query loop from another function.
     def _run_phase_one(self, query_idx):
 
@@ -317,20 +300,14 @@ class QuerySet:
         print("Now processing query idx: ", str(query_idx))
         print("****************************************")
 
-        print("shape of self.Q: ", str(np.shape(self.Q)))
         self.q = self.Q[query_idx,:] # self.Q is (num_queries,num_dims) -> self.q is (num_dims,) -> The first query
-        print("shape of self.q at start of run_phase_one: ", str(np.shape(self.q)))
+        # print("shape of self.q at start of run_phase_one: ", str(np.shape(self.q)))
 
         # These are (1, 50) for 50-NN 
         self.ANS = np.ones((self.ctx.query_k), dtype=np.float32)*np.inf
         self.UP = np.ones((self.ctx.query_k), dtype=np.float32)*np.inf
         self.V = np.ones((self.ctx.query_k), dtype=np.uint32)*np.inf
 
-        # These are all (num_vectors, 1)
-        # self.L = np.zeros((self.ctx.num_vectors,1), dtype=np.float32)
-        # self.U = np.zeros((self.ctx.num_vectors,1), dtype=np.float32)
-        # self.S1 = np.zeros((self.ctx.num_vectors,1), dtype=np.float32)
-        # self.S2 = np.zeros((self.ctx.num_vectors,1), dtype=np.float32)
         self.L = np.zeros((self.ctx.num_vectors), dtype=np.float32)
         self.U = np.zeros((self.ctx.num_vectors), dtype=np.float32)
         self.S1 = np.zeros((self.ctx.num_vectors), dtype=np.float32)
@@ -350,9 +327,9 @@ class QuerySet:
         #               when comparing the query to the vectors
         calcdists_reft = timeit.default_timer()
         
-        boundary_vals_wrapped = np.roll(self.ctx.boundary_vals,-1,0)
-        D1 = np.abs(np.subtract(boundary_vals_wrapped, self.q[:,None].ravel(), where=boundary_vals_wrapped!=0, out=np.zeros_like(boundary_vals_wrapped) )  )
-        D2 = np.abs(np.subtract(self.ctx.boundary_vals, self.q[:,None].ravel(), where=self.ctx.boundary_vals!=0, out=np.zeros_like(self.ctx.boundary_vals) )  )
+        boundary_vals_wrapped = np.roll(self.ctx.boundary_vals,-1,0) # Roll rows; 1st row becomes 0th, 0th becomes last.
+        D1 = np.abs(np.subtract(boundary_vals_wrapped, self.q[:,None].ravel(), where=boundary_vals_wrapped!=0, out=np.zeros_like(boundary_vals_wrapped) )  ) # cset+1
+        D2 = np.abs(np.subtract(self.ctx.boundary_vals, self.q[:,None].ravel(), where=self.ctx.boundary_vals!=0, out=np.zeros_like(self.ctx.boundary_vals) )  ) # cset
         D_MIN = np.square(np.minimum(D1,D2))
         D_MAX = np.square(np.maximum(D1,D2))
         
@@ -362,46 +339,21 @@ class QuerySet:
         dimloop_reft = timeit.default_timer()
 
         block_count = 0 # MATLAB j
-        # Block/dimension loop
-        for CSET in vaq_gene: # block = cset -> (num_vectors, 1)
-
-            # print()    
-            # print("Block/Dimension : ", block_count)
-            # print("----------------------")
+        for CSET in vaq_gene: # cset is a block of VAQ -> (num_vectors, 1)
 
             cells_for_dim = self.ctx.cells[block_count]
             qj = self.q[block_count]
 
-            # Calculate R
-            # R=min(find(q(j)<=B(2:CELLS(j)+1,j)))-1;
-            # Based on notes: We want to find the smallest boundary val index to the right of the query point's true value. We 
-            # then subtract 1 from it. For this reason, we first look at boundary_vals[1], as this is the lowest boundary value
-            # index which makes up the "right hand side" of a cell. After subtracting 1, this gives us the left hand side of the interval
-            # which contains the query point. This is just a scalar.
-            
-            # R = np.min(np.where(qj <= self.boundary_vals[1:cells_for_dim+1, block_count])) - 1    # ORIG
-            
-            # Experiment 1
-            target_cells = np.where(qj <= self.ctx.boundary_vals[1:cells_for_dim+1, block_count])   # Closest to MATLAB - seems best
-
-            # target_cells = np.where(qj <= self.ctx.boundary_vals[0:cells_for_dim, block_count])   # What we have been doing
-
-            # target_cells = np.where(qj <= self.ctx.boundary_vals[0:cells_for_dim+1, block_count])   # Possible
-            
+            # The np.where selects RIGHT boundaries, but target_cells will be set to values 1 lower than the corresponding boundary_vals,
+            # because we're only searching over [1:cells_for_dim+1] i.e. starting at row 1. So these are really LEFT boundaries.
+            target_cells = np.where(qj <= self.ctx.boundary_vals[1:cells_for_dim+1, block_count]) 
             
             if target_cells[0].size == 0:
-                # R = cells_for_dim - 1
-                R = cells_for_dim
+                R = cells_for_dim # If qj > all boundary_vals, put in final cell -> this is the LEFT boundary of final cell.
             else:
-                R = np.min(target_cells[0])
-                # R = np.clip(np.min(target_cells[0]) - 1, 0, QuerySet.MAX_UINT8)    
+                R = np.min(target_cells[0]) 
 
-            # Calculate q_rep (can't call it Q again!)
-            # In MATLAB, we only repmat NO_OF_BLOCKS times. This means that the following happens (num_vectors/num_blocks) = num_vectors_per_block times.
-            # Here, I'm tiling it num_vectors_per_block times to create a (num_vectors_per_block, 1). 
-            # The loop below will thus only happen num_blocks times.
-            # qj_rep = np.tile(self.q[block_count], (num_vectors_per_block, 1))
-
+            # Populate chunks of self.S1 and self.S2 (could probably remove this block loop)
             for i in range(num_blocks): 
 
                 qblock_reft = timeit.default_timer()
@@ -409,7 +361,7 @@ class QuerySet:
                 # cset should be (num_vectors_per_block,1)
                 cset = CSET[i*num_vectors_per_block: (i+1)*num_vectors_per_block]         
 
-                # 21/10/2023    Use cset values to index into the distances array created for the query
+                # Use cset values to index into the distances array created for the query
                 self.S1[i*num_vectors_per_block: (i+1)*num_vectors_per_block] = D_MIN[cset,block_count]
                 self.S2[i*num_vectors_per_block: (i+1)*num_vectors_per_block] = D_MAX[cset,block_count]
 
@@ -418,11 +370,9 @@ class QuerySet:
 
             x = np.logical_not(CSET == R).astype(np.int32)
 
-            # Calculate L (lower bound): L=L+x.*S1;
-            # L is (num_vectors, 1).
+            # Calculate L (lower bound): L=L+x.*S1;    L is (num_vectors, 1).
             # Adds the lower bound distance for the dimension in question, to a running total which becomes the overall (squared) lower bound distance. 
-            # The reason we have to apply the mask x for this step is that if the query point and any of the data points reside in the same interval 
-            # (along dimension j i.e. block_count), their lower bound distance needs to be 0.
+            # Mask x ensures that points in the same interval along a given dimension have LB distance 0 over that dimension.
             self.L = self.L + np.multiply(x, self.S1)
 
             # Calculate U (upper bound)
@@ -441,19 +391,9 @@ class QuerySet:
         # Elim counting
         elim = 0
 
-        # Make a heap of self.UP (heapify)
-        # UP_heap = np.multiply(self.UP, -1).tolist()
-        # heapify(UP_heap)
         get_max_next_time = True
         for i in range(self.ctx.num_vectors):
 
-            # # Original
-            # if self.L[i] <= self.UP[self.ctx.query_k - 1]:
-            #     UP_appended_sorted = np.sort(np.append(self.UP, self.U[i])) # Diff variable names than MATLAB
-            #     self.UP = UP_appended_sorted[0:self.ctx.query_k]
-
-            # New algo:
-            # Check if U[i] is < np.max(self.UP) -> get the max in a var. If so, replace it.
             if get_max_next_time:
                 max_up = self.UP.max() # https://stackoverflow.com/questions/10943088/numpy-max-or-max-which-one-is-faster
                 max_up_idx = np.argmax(self.UP) # If multiple same max val, returns min idx.
@@ -462,9 +402,10 @@ class QuerySet:
                     self.UP[max_up_idx] = self.U[i]
                     get_max_next_time = True
                 else:
-                    # Adding elim += 1 here improves P1, but makes P2 reads inconsistent with P1 prunes.
                     get_max_next_time = False
-                    # elim += 1
+                    
+                    # # Adding elim += 1 makes P1 elims inconsistent with P2 visits.
+                    # elim += 1 
 
             else:
                 elim += 1
@@ -475,7 +416,6 @@ class QuerySet:
 
         msg = 'Query : ' + str(query_idx) + ' Elim Counting'        
         self.ctx.debug_timer('QuerySet._run_phase_one',elimcount_reft, msg, 1)
-
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
     # May have a separate version of this function for the case where the entire VAQIndex fits into memory.
@@ -514,40 +454,22 @@ class QuerySet:
         msg = 'Query : ' + str(query_idx) + ' Calc boundary LB/UB distances'
         self.ctx.debug_timer('QuerySet._run_phase_one',calcdists_reft, msg, 1)
 
-        # Calculate R_cells
-        # 22.10.2023: Objective is to produce a (128,) array containing index positions of selected boundary value for each dimension
+        # 22.10.2023: Produce a (128,) array containing index positions of selected boundary value (LEFT boundaries) for each dimension
         min_target_cells = np.min( np.where( ( self.q <= self.ctx.boundary_vals ) & ( self.ctx.boundary_vals != 0), self.ctx.boundary_vals, np.inf) , axis=0)
-        # final_min_target_cells = np.where(min_target_cells !=np.inf, min_target_cells, np.max(self.ctx.boundary_vals, axis=0))
 
         R_cells = np.zeros(self.ctx.num_dimensions, dtype=np.uint8)
         for i in range(self.ctx.num_dimensions):
-            # R_cells[i] = np.squeeze( np.where(final_min_target_cells[i] == self.ctx.boundary_vals[0:self.ctx.cells[i]+1,i])[0]  )
-            # R_cells[i] = np.where(final_min_target_cells[i] == self.ctx.boundary_vals[0:self.ctx.cells[i]+1,i])[0] - 1
-
-            # Changed to [1:cells_for_dim+1] to be consistent with run_phase_one. Returns left boundary index of the cell you're in.
             
-            # R_cells[i] = np.where(final_min_target_cells[i] == self.ctx.boundary_vals[1:self.ctx.cells[i]+1,i])[0]     
+            # Ensures consistency with _run_phase_one for very large values.
             if min_target_cells[i] == np.inf:
                 R_cells[i] = self.ctx.cells[i]
             else:
                 R_cells[i] = np.where(min_target_cells[i] == self.ctx.boundary_vals[1:self.ctx.cells[i]+1,i])[0]   
-
-            # # Debugging when investigating boundary selection
-            # print(self.q)
-            # print()
-            # print(self.ctx.boundary_vals[0:self.ctx.cells[i]+1,i])
-            # print(R_cells[i])
-            # print()
-
         
         num_vectors_per_block = self.ctx.num_vectors_per_block
         dimloop_reft = timeit.default_timer()
 
         for blockno in range(self.ctx.num_blocks): 
-            
-            # print()    
-            # print("Block : ", blockno)
-            # print("-----------")
             
             qblock_reft = timeit.default_timer()
             
@@ -567,13 +489,6 @@ class QuerySet:
 
             msg = 'Query ' + str(query_idx) + ' Dim ' + str(i) + ' Chunk ' + str(i) + ' Populating S1/S2 chunk'
             self.ctx.debug_timer('QuerySet._run_phase_one', qblock_reft, msg, 2)
-
-
-        # Calculate L (lower bound): L=L+x.*S1;
-        # L is (num_vectors, 1).
-        # Adds the lower bound distance for the dimension in question, to a running total which becomes the overall (squared) lower bound distance. 
-        # The reason we have to apply the mask x for this step is that if the query point and any of the data points reside in the same interval 
-        # (along dimension j i.e. block_count), their lower bound distance needs to be 0.
                 
         msg = 'Query : ' + str(query_idx) + ' Dimensions block'        
         self.ctx.debug_timer('QuerySet._run_phase_one',dimloop_reft, msg, 1)
@@ -584,16 +499,7 @@ class QuerySet:
         elim = 0
         get_max_next_time = True
         for i in range(self.ctx.num_vectors):
-            
-            
-            # # ORIGINAL Algorithm (slow)                
-            # if self.L[i] <= self.UP[self.ctx.query_k - 1]:
-            #     UP_appended_sorted = np.sort(np.append(self.UP, self.U[i])) # Diff variable names than MATLAB
-            #     self.UP = UP_appended_sorted[0:self.ctx.query_k]
-            # else:
-            #     elim += 1
 
-            # NEW Algorithm (25/10/2023)
             if get_max_next_time:
                 max_up = self.UP.max()
                 max_up_idx = np.argmax(self.UP) # If multiple same max val, returns min idx.
@@ -614,7 +520,6 @@ class QuerySet:
         self.ctx.debug_timer('QuerySet._run_phase_one',elimcount_reft, msg, 1)
     
     # ----------------------------------------------------------------------------------------------------------------------------------------
-    # Will need to perform random seeks through transformed data set.
     def _run_phase_two(self, query_idx):
         
         # Sort L (lower bounds) into [LL, J], also need original indices 
@@ -626,27 +531,22 @@ class QuerySet:
 
         # Loop over all vectors; is this sensible; don't we just want to consider candidates only in terms of their LBs?
         vectors_considered_p2 = 0
+
         for i in range(self.ctx.num_vectors):
 
             # If lower bound of i is greater than 50th best upper bound, stop
             if LL[i] > self.ANS[self.ctx.query_k -1]:
                 break
-            # Else -> viable option
             else:
-                # Random read from transformed file. 
-                # Using J[i] rather than J[i]+1, since Python is zero-indexed.
-                # Amount to read is num_dimensions words
-                # TSET will be (1, num_dimensions), don't forget the MATLAB transpose!
+                # Random read (of num_dimensions words) from transformed file. 
                 start_offset = J[i]*self.ctx.num_dimensions*self.ctx.word_size
-                # TSET = self.ctx.TDS.tf_random_read(start_offset[0], num_words_random_read)
-                TSET = self.ctx.TDS.tf_random_read(start_offset, num_words_random_read)
+                TSET = self.ctx.TDS.tf_random_read(start_offset, num_words_random_read) # (1, num_dimensions)
 
                 # Append squared distance between self.q (could also use self.Q[query_idx, :]) and the vector read from disk to ANS
-                # delta_new += np.sum(np.square(X_i - r[i]))
-                # self.q and TSET should both be (1, num_dimensions)
+                # self.q and TSET are both (1, num_dimensions)
                 T = np.append(self.ANS, np.sum(np.square(self.q - TSET)))
 
-                # Append J[i] (see L223) to V
+                # Append J[i] to V
                 W = np.append(self.V, J[i])
 
                 # Sort ANS and also keep original locations
@@ -664,7 +564,6 @@ class QuerySet:
         
         # Done with search
 
-        # second_stage of this query = i
         self.second_stage[query_idx] = vectors_considered_p2
 
     # ----------------------------------------------------------------------------------------------------------------------------------------

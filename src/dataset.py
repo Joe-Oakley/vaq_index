@@ -1,7 +1,6 @@
 import numpy as np
 from numpy import linalg as LA
 import os
-import json
 
 from qsession import QSession
 
@@ -81,9 +80,9 @@ class DataSet:
         
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
+    # self.cov_matrix is (num_dimensions, num_dimensions)
     def _calc_cov_matrix(self):
-        # self.cov_matrix is (num_dimensions, num_dimensions)
-
+        
         # Open file
         self._open_file()
 
@@ -103,13 +102,11 @@ class DataSet:
 
         self._close_file()
 
-        # self.ctx.cov_matrix = np.divide(self.ctx.cov_matrix, self.ctx.num_blocks)
         self.ctx.cov_matrix = np.divide(self.ctx.cov_matrix, self.ctx.num_blocks).astype(np.float32)
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
+    # Transformation matrix is (num_dimensions, num_dimensions)
     def _calc_transform_matrix(self):
-
-        # KLT transformation matrix is (num_dimensions, num_dimensions)
 
         # Calculate eigenvalues (array D) and corresponding eigenvectors (matrix V, one eigenvector per column)
         # D is already equivalent to E in MATLAB code.
@@ -129,6 +126,7 @@ class DataSet:
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
     def _save_dataset_vars(self):
+
         np.savez(os.path.join(self.ctx.path, '') + self.ctx.fname + '.dsvars', DIM_MEANS=self.ctx.dim_means,
                  COV_MATRIX=self.ctx.cov_matrix, TRANSFORM_MATRIX=self.ctx.transform_matrix)
 

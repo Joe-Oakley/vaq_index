@@ -124,7 +124,7 @@ class VAQIndex:
 
             # If in-memory vaq file requested for mode Q, load it now.
             # N.B., for mode F it will be loaded after build phase (later)
-            if self.ctx.inmem_vaqdata: # Careful which mode you're in?
+            if self.ctx.inmem_vaqdata:
                 self._load_vaqdata()
 
         if self.ctx.use_qhist:
@@ -157,16 +157,15 @@ class VAQIndex:
             temp_bb = self.ctx.bit_budget
             while temp_bb > 0:
                 # Get index of dimension with maximum energy
-                max_energy_dim = np.min(
-                    np.argmax(self.energies))  # np.min to cater for two dims with equal energy - unlikely!
+                max_energy_dim = np.min(np.argmax(self.energies))  # np.min to cater for two dims with equal energy - unlikely!
 
                 # Double the number of "cells" for that dimension
                 if self.ctx.cells[max_energy_dim] * 2 > VAQIndex.MAX_UINT8:
-                    pass  # Don't blow the capcity of a UINT8
+                    pass  # Don't blow the capacity of a UINT8
                 else:
                     self.ctx.cells[max_energy_dim] = self.ctx.cells[max_energy_dim] * 2
 
-                # Divide the energy of that dimension by 4 (for future iterations)                
+                # Divide the energy of that dimension by 4 - assumes normal distribution.              
                 self.energies[max_energy_dim] = self.energies[max_energy_dim] / 4
 
                 # Check there aren't more cells than data points (unlikely)
@@ -174,11 +173,10 @@ class VAQIndex:
                     print("WARNING : self.ctx.cells[max_energy_dim] > self.ctx.num_vectors !!")
                     self.ctx.cells[max_energy_dim] = self.ctx.cells[max_energy_dim] / 2
 
-                # Decrement temp_bb
                 else:
                     temp_bb -= 1
 
-        # Uniform bit allocation - have already asserted that bit budget divides by num_dims
+        # Uniform bit allocation
         else:
             bits_per_dim = int(self.ctx.bit_budget / self.ctx.num_dimensions)
             levels = 2 ** bits_per_dim
@@ -200,10 +198,8 @@ class VAQIndex:
         byte_counter = 0
         self.qhist_handle_read.seek(byte_counter, os.SEEK_SET) # Seek takes a byte counter
         num_queries_qhist = np.fromfile(file=self.qhist_handle_read, count=1, dtype=np.uint32)[0] # Count is in words
-        # num_queries_qhist = num_queries_qhist[0]
         byte_counter += self.ctx.word_size
 
-        # Loop over num_queries:
         for i in range(num_queries_qhist):
 
             # Read 4 words (np.fromfile): query_id, query_k, phase 1 elims, phase 2 visits
@@ -236,12 +232,11 @@ class VAQIndex:
                 else:
                     self.weights[vector_id] += self.ctx.q_lambda * qvr
 
-        print("weights after: " , self.weights)
-        print("mean of weights after: ", np.mean(self.weights))
-        print("max of weights after: ", np.max(self.weights))
+        # print("weights after: " , self.weights)
+        # print("mean of weights after: ", np.mean(self.weights))
+        # print("max of weights after: ", np.max(self.weights))
         
         # Close qhist fle
-        # self._close_file(self.qhist_handle_read)
         self._close_file('qhist', 'rb')
 
         # Open weights file (write)
@@ -251,7 +246,6 @@ class VAQIndex:
         self.weights_handle_write.write(self.weights)
 
         # Close weights file
-        # self._close_file(self.weights_handle_write)
         self._close_file('weights', 'wb')
 
 
@@ -264,19 +258,16 @@ class VAQIndex:
         # Set up tp generator
         tp_gene = self.ctx.TDS.generate_tp_block()
 
-        # Set up block counter. Also effectively a dimension counter.
+        # Set up block counter (also dimension counter).
         block_count = 0
 
-        # Loop over tp generated blocks
         # Each tp block is (num_vectors, 1) of np.float32. One block = all values for 1 dimension.
         for block in tp_gene:
 
             # Sort the block. N.B., can change np sort algorithm (https://numpy.org/doc/stable/reference/generated/numpy.sort.html)
             sorted_block = np.sort(block, axis=0)
 
-            # Set first boundary_val (0) along current dimension to min(block) - 0.001; just less than min value
-            # along dimension N.B. self.boundary_vals is (max(self.cells) + 1, num_dimensions). +1 as there are k+1
-            # boundary values for k cells.
+            # Set first boundary_val (0) along current dimension to just less than min value
             self.ctx.boundary_vals[0, block_count] = sorted_block[0] - 0.001
 
             cells_for_dim = self.ctx.cells[block_count]
@@ -284,8 +275,7 @@ class VAQIndex:
             # Loop over the number of cells allocated to current dimension - careful with indices, should start at 1 and go to penultimate.
             # If cells_for_dim = 32, this will go to idx 31. That's fine, because boundary_vals goes up to max(cells) + 1.
             for j in range(1, cells_for_dim):
-                # Set boundary vals
-                # Not adding 1 to j idx, because we start at 0 in Python.
+
                 # Using math ceil; alternative is np
                 self.ctx.boundary_vals[j, block_count] = sorted_block[
                     math.ceil(j * self.ctx.num_vectors / cells_for_dim)]
@@ -298,9 +288,9 @@ class VAQIndex:
             block_count += 1
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
-    def _design_boundaries(self):
     # Operates on transposed file
-
+    def _design_boundaries(self):
+    
         # Set up tp generator
         tp_gene = self.ctx.TDS.generate_tp_block()
 
@@ -314,32 +304,22 @@ class VAQIndex:
             cells_for_dim = self.ctx.cells[block_count]
 
             # If current dimension only has 1 cell (i.e. 0 bits allocated to it), then break and end.
-            # We should break rather than continue, because I'm pretty sure values in self.cells are implicitly sorted descending?
+            # Think values in self.cells are implicitly sorted descending.
             if self.ctx.cells[block_count] == 1:
                 break
 
             # Call Lloyd's algorithm function -> could be replaced by modified Lloyds
-            # MATLAB has B(1:CELLS(i)+1, i). Say a dim has 32 cells, this goes from 1 to 33, inclusive.
-            # Ours will go from 0 to 33, not inclusive at the top, so really 0->32. Should be equivalent.
-
-            # Experiment 1
-            # r, c = self._lloyd(block, self.boundary_vals[0:cells_for_dim+1, block_count])   
-
+            # MATLAB has B(1:CELLS(i)+1, i). Say a dim has 4 cells, this goes from 1 to 5, inclusive.
+            # Ours will go from 0 to 5, not inclusive at the top, so really 0,1,2,3,4. Therefore equivalent. 
             if self.ctx.use_qhist:
-                # Doesn't work yet! Probably also needs cells_for_dim+1?
                 # r, c = self._weighted_lloyd(block, self.ctx.boundary_vals[0:cells_for_dim+1, block_count])
                 r, c = self._lloyd(block, self.ctx.boundary_vals[0:cells_for_dim+1, block_count])
             else:
-                # r, c = self._lloyd(block, self.ctx.boundary_vals[0:cells_for_dim, block_count])
                 r, c = self._lloyd(block, self.ctx.boundary_vals[0:cells_for_dim+1, block_count])
 
-            # Set boundary values to designed boundary values. Not using r; might stop returning it.
-
-            # Experiment 1
             self.ctx.boundary_vals[0:cells_for_dim+1, block_count] = c
             # self.ctx.boundary_vals[0:cells_for_dim, block_count] = c
 
-            # Increment block_count - this was missing
             block_count += 1
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
@@ -365,13 +345,8 @@ class VAQIndex:
             delta_new = np.float32(0)
             num_lloyd_iterations += 1
 
-            # print("_lloyd while true loop")
-            # print()
-
             # Loop over intervals; careful with indices
-            for i in range(num_boundary_vals - 1):
-
-                # print("    i loop : ", i)                
+            for i in range(num_boundary_vals - 1):         
 
                 # Find values in block between boundary values; np.where?
                 X_i = block[np.where(np.logical_and(block >= c[i], block < c[i + 1]))]
@@ -388,12 +363,8 @@ class VAQIndex:
             # Sort representative values - todo: sorting algorithm selection
             r = np.sort(r)
 
-            # print()
-
             # Update boundary values based on representative values
-            for j in range(1, num_boundary_vals):  # MATLAB has a -1 here... don't think we need?
-
-                # print("    j loop : ", j)                
+            for j in range(1, num_boundary_vals):  # MATLAB has a -1 here... don't think we need?   
 
                 c[j] = (r[j - 1] + r[j]) / 2
 
@@ -429,9 +400,6 @@ class VAQIndex:
             delta_new = np.float32(0)
             num_lloyd_iterations += 1
 
-            # print("_lloyd while true loop")
-            # print()
-
             # Loop over intervals; careful with indices
             for i in range(num_boundary_vals - 1):
 
@@ -441,18 +409,10 @@ class VAQIndex:
                 idxs = np.where(np.logical_and(block >= c[i], block < c[i + 1]))[0]
 
                 X_i = block[idxs]
-
-                # print("idxs: ", idxs)
-                # print("X_i type: ", type(X_i))
-                # print("X_i shape: ", np.shape(X_i))
-                # print("self.weights type: ", type(self.weights))
-                # print("self.weights shape: ", np.shape(self.weights))
-
                 W_i = self.weights[idxs]
 
                 # If any values found
                 if np.shape(X_i)[0] > 0:
-                    # r[i] = np.mean(X_i) # Change this 
                     r[i] = np.divide(np.sum(np.multiply(W_i, X_i)), np.sum(W_i))
                 else:
                     r[i] = np.random.rand(1) * (M2 - M1) + M1
@@ -463,12 +423,8 @@ class VAQIndex:
             # Sort representative values - todo: sorting algorithm selection
             r = np.sort(r)
 
-            # print()
-
             # Update boundary values based on representative values
-            for j in range(1, num_boundary_vals):  # MATLAB has a -1 here... don't think we need?
-
-                # print("    j loop : ", j)                
+            for j in range(1, num_boundary_vals):  # MATLAB has a -1 here... don't think we need?   
 
                 c[j] = (r[j - 1] + r[j]) / 2
 
@@ -477,11 +433,11 @@ class VAQIndex:
             if ((delta - delta_new) / delta) < stop:
                 print("Number of Lloyd's iterations: ", str(num_lloyd_iterations))
                 return r, c
+
             delta = delta_new
     
     # ----------------------------------------------------------------------------------------------------------------------------------------
     # Operates on the transposed datafile. 
-    # Writes the vaqfile -> use vaq_handle_write     
     def _create_vaqfile(self):
 
         # Could init this in loop?
@@ -503,10 +459,7 @@ class VAQIndex:
 
             # Loop over i in range(cells[block_count])
             for i in range(self.ctx.cells[block_count]):
-                # print("                   Block     : ", i)
 
-                # A = np where statement, to find values between boundary_vals i and i+1 along current dim (idx block_count)
-                # Effectively finding the indices of all elements that lie between the two boundaries, i.e. in a particular cell.
                 l = self.ctx.boundary_vals[i, block_count]
                 r = self.ctx.boundary_vals[i + 1, block_count]
                 A = np.where(np.logical_and(block >= l, block < r))[0]
@@ -524,7 +477,6 @@ class VAQIndex:
         print(self.ctx.boundary_vals[0,:])
         
         # Close vaqfile
-        # self._close_file(self.vaq_handle_write)
         self._close_file('vaq', 'wb')
     
     # ----------------------------------------------------------------------------------------------------------------------------------------
@@ -537,12 +489,10 @@ class VAQIndex:
         with open(self.full_vaq_fname, mode="rb") as f:
 
             while True:
-                # Using TDS.tp_num_words_per_block as should be same size
                 f.seek(self.ctx.tp_num_words_per_block * block_idx, os.SEEK_SET)
                 block = np.fromfile(file=f, count=self.ctx.tp_num_words_per_block, dtype=np.uint8)
 
                 if block.size > 0:
-                    # block = np.reshape(block, (self.ctx.num_vectors, 1))
                     block = np.reshape(block, (self.ctx.num_vectors))
                     yield block
                     block_idx += 1
