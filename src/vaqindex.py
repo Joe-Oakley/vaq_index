@@ -8,18 +8,15 @@ from qsession import QSession
 
 class VAQIndex:
     MAX_UINT8 = 255
+    MAX_LLOYD_ITERATIONS = 75    
+    LLOYD_STOP = 0.005  
 
     def __init__(self, ctx: QSession = None):
         self.ctx                  = ctx
         self.full_vaq_fname       = None 
         # self.full_qhist_fname     = None # Should this be in qsession?
         self.full_weights_fname   = None # Writing weights will be useful when updating VAQ later.
-        self.vaq_handle_read      = None
-        self.vaq_handle_write     = None
-        self.qhist_handle_read    = None
-        self.qhist_handle_write   = None
-        self.weights_handle_read  = None
-        self.weights_handle_write = None
+
         self.energies             = None
         self.cset                 = None
         self.vaqdata              = None
@@ -27,87 +24,6 @@ class VAQIndex:
         
         # Initialisations
         self._initialise()
-
-    # ----------------------------------------------------------------------------------------------------------------------------------------
-    def _open_file(self, ftype, mode):
-
-        if ftype == 'vaq':
-            if mode == 'rb':
-                self.vaq_handle_read = open(self.full_vaq_fname, mode=mode)
-            elif mode == 'wb':
-                self.vaq_handle_write = open(self.full_vaq_fname, mode=mode)
-            else:
-                raise ValueError("Invalid mode selected: ", mode)
-        elif ftype == 'qhist':
-            if mode == 'rb':
-                self.qhist_handle_read = open(self.ctx.qhist_fname, mode=mode)
-            elif mode == 'wb':
-                self.qhist_handle_write = open(self.ctx.qhist_fname, mode=mode)
-            else:
-                raise ValueError("Invalid mode selected: ", mode)
-        elif ftype == 'weights':
-            if mode == 'rb':
-                self.weights_handle_read = open(self.full_weights_fname, mode=mode)
-            elif mode == 'wb':
-                self.weights_handle_write = open(self.full_weights_fname, mode=mode)
-            else:
-                raise ValueError("Invalid mode selected: ", mode)
-        else:
-            raise ValueError("Invalid ftype selected: ", ftype)
-
-    # # ----------------------------------------------------------------------------------------------------------------------------------------
-    # def _close_file(self, handle):
-
-    #     if handle == self.vaq_handle_read:
-    #         self.vaq_handle_read = None
-    #     elif handle == self.vaq_handle_write:
-    #         self.vaq_handle_write = None
-    #     elif handle == self.qhist_handle_read:
-    #         self.qhist_handle_read = None
-    #     elif handle == self.qhist_handle_write:
-    #         self.qhist_handle_write = None
-    #     elif handle == self.weights_handle_read:
-    #         self.weights_handle_read = None
-    #     elif handle == self.weights_handle_write:
-    #         self.weights_handle_write = None
-    #     else:
-    #         raise ValueError("Invalid handle given to _close_file().")
-
-    #     handle.close()
-
-    # ----------------------------------------------------------------------------------------------------------------------------------------
-    def _close_file(self, ftype, mode): # ftypes: vaq, qhist, weights. modes: 'rb', 'wb'
-
-        if ftype == 'vaq':
-            if mode == 'rb':
-                self.vaq_handle_read.close()
-                self.vaq_handle_read = None
-            elif mode == 'wb':
-                self.vaq_handle_write.close()
-                self.vaq_handle_write = None
-            else:
-                raise ValueError("Invalid mode selected: ", mode)
-        elif ftype == 'qhist':
-            if mode == 'rb':
-                self.qhist_handle_read.close()
-                self.qhist_handle_read = None
-            elif mode == 'wb':
-                self.qhist_handle_write.close()
-                self.qhist_handle_write = None
-            else:
-                raise ValueError("Invalid mode selected: ", mode)
-        elif ftype == 'weights':
-            if mode == 'rb':
-                self.weights_handle_read.close()
-                self.weights_handle_read = None
-                
-            if mode == 'wb':
-                self.weights_handle_write.close()
-                self.weights_handle_write = None
-            else:
-                raise ValueError("Invalid mode selected: ", mode)
-        else:
-            raise ValueError("Invalid ftype selected: ", ftype)
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
     def _initialise(self):
@@ -192,61 +108,74 @@ class VAQIndex:
         print("weights before: " , self.weights)
 
         # Open qhist file (read)
-        self._open_file('qhist', 'rb')
+        # self._open_file('qhist', 'rb')
+        with open(self.ctx.qhist_fname, mode='rb') as f:
 
-        # Read first word -> num_queries (in qhist file)
-        byte_counter = 0
-        self.qhist_handle_read.seek(byte_counter, os.SEEK_SET) # Seek takes a byte counter
-        num_queries_qhist = np.fromfile(file=self.qhist_handle_read, count=1, dtype=np.uint32)[0] # Count is in words
-        byte_counter += self.ctx.word_size
+            # Read first word -> num_queries (in qhist file)
+            byte_counter = 0
 
-        for i in range(num_queries_qhist):
+            # self.qhist_handle_read.seek(byte_counter, os.SEEK_SET) # Seek takes a byte counter
+            # num_queries_qhist = np.fromfile(file=self.qhist_handle_read, count=1, dtype=np.uint32)[0] # Count is in words
+            f.seek(byte_counter, os.SEEK_SET) # Seek takes a byte counter
+            num_queries_qhist = np.fromfile(file=f, count=1, dtype=np.uint32)[0] # Count is in words
 
-            # Read 4 words (np.fromfile): query_id, query_k, phase 1 elims, phase 2 visits
-            self.qhist_handle_read.seek(byte_counter, os.SEEK_SET)
-            q_info = np.fromfile(file=self.qhist_handle_read, count = 4, dtype=np.uint32)
-            q_info = np.reshape(q_info, (4,1), order="C")
-            q_id, q_k, q_p1, q_p2 = q_info[0,0], q_info[1,0], q_info[2,0], q_info[3,0] 
-            byte_counter += 4 * self.ctx.word_size
+            byte_counter += self.ctx.word_size
 
-            # Read next (2*query_k) words (np.fromfile) -> reshape into (k, 2) distances matrix, probably order C
-            self.qhist_handle_read.seek(byte_counter, os.SEEK_SET)
-            distances = np.fromfile(file=self.qhist_handle_read, count = 2*q_k, dtype=np.float32)
-            distances = np.reshape(distances, (q_k, 2), order='C')
-            byte_counter += 2 * q_k * self.ctx.word_size
+            for i in range(num_queries_qhist):
 
-            # Loop over rows k of distances matrix
-            for j in range(q_k):
+                # Read 4 words (np.fromfile): query_id, query_k, phase 1 elims, phase 2 visits
+                # self.qhist_handle_read.seek(byte_counter, os.SEEK_SET)
+                # q_info = np.fromfile(file=self.qhist_handle_read, count = 4, dtype=np.uint32)
+                f.seek(byte_counter, os.SEEK_SET)
+                q_info = np.fromfile(file=f, count = 4, dtype=np.uint32)
 
-                # Calculate query visit ratio for this query
-                qvr = np.divide(q_p2, q_k)
+                q_info = np.reshape(q_info, (4,1), order="C")
+                q_id, q_k, q_p1, q_p2 = q_info[0,0], q_info[1,0], q_info[2,0], q_info[3,0] 
+                byte_counter += 4 * self.ctx.word_size
 
-                # Update self.weights[k]
-                vector_id = int(distances[j,0])
+                # Read next (2*query_k) words (np.fromfile) -> reshape into (k, 2) distances matrix, probably order C
+                # self.qhist_handle_read.seek(byte_counter, os.SEEK_SET)
+                # distances = np.fromfile(file=self.qhist_handle_read, count = 2*q_k, dtype=np.float32)
+                f.seek(byte_counter, os.SEEK_SET)
+                distances = np.fromfile(file=f, count = 2*q_k, dtype=np.float32)
 
-                if self.ctx.relative_dist:
-                    if distances[0,1] > 0: 
-                        self.weights[vector_id] += (np.divide(distances[0,1], distances[j,1]) * self.ctx.q_lambda * qvr)
+                distances = np.reshape(distances, (q_k, 2), order='C')
+                byte_counter += 2 * q_k * self.ctx.word_size
+
+                # Loop over rows k of distances matrix
+                for j in range(q_k):
+
+                    # Calculate query visit ratio for this query
+                    qvr = np.divide(q_p2, q_k)
+
+                    # Update self.weights[k]
+                    vector_id = int(distances[j,0])
+
+                    if self.ctx.relative_dist:
+                        if distances[0,1] > 0: 
+                            self.weights[vector_id] += (np.divide(distances[0,1], distances[j,1]) * self.ctx.q_lambda * qvr)
+                        else:
+                            self.weights[vector_id] += (np.divide(0.001, distances[j,1]) * self.ctx.q_lambda * qvr)
                     else:
-                        self.weights[vector_id] += (np.divide(0.001, distances[j,1]) * self.ctx.q_lambda * qvr)
-                else:
-                    self.weights[vector_id] += self.ctx.q_lambda * qvr
+                        self.weights[vector_id] += self.ctx.q_lambda * qvr
 
         # print("weights after: " , self.weights)
         # print("mean of weights after: ", np.mean(self.weights))
         # print("max of weights after: ", np.max(self.weights))
         
         # Close qhist fle
-        self._close_file('qhist', 'rb')
+        # self._close_file('qhist', 'rb')
 
         # Open weights file (write)
-        self._open_file('weights', 'wb')
+        # self._open_file('weights', 'wb')
+        with open(self.full_weights_fname, mode='wb') as f:
 
-        # Write weights
-        self.weights_handle_write.write(self.weights)
+            # Write weights
+            # self.weights_handle_write.write(self.weights)
+            f.write(self.weights)
 
         # Close weights file
-        self._close_file('weights', 'wb')
+        # self._close_file('weights', 'wb')
 
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
@@ -430,7 +359,10 @@ class VAQIndex:
 
             # Stopping condition check
             # print("((delta - delta_new)/delta) -> ", ((delta - delta_new)/delta))
-            if ((delta - delta_new) / delta) < stop:
+            # if ((delta - delta_new) / delta) < stop:
+            #     print("Number of Lloyd's iterations: ", str(num_lloyd_iterations))
+            #     return r, c
+            if ( ((delta - delta_new) / delta) < VAQIndex.LLOYD_STOP ) or ( num_lloyd_iterations >= VAQIndex.MAX_LLOYD_ITERATIONS ):
                 print("Number of Lloyd's iterations: ", str(num_lloyd_iterations))
                 return r, c
 
@@ -450,34 +382,36 @@ class VAQIndex:
         block_count = 0
 
         # Open vaqfile -> write handle
-        self._open_file('vaq', 'wb')
+        # self._open_file('vaq', 'wb')
+        with open(self.full_vaq_fname, mode='wb') as f:
 
-        # Loop over tp blocks (i.e. loop over dimensions)
-        for block in tp_gene:
+            # Loop over tp blocks (i.e. loop over dimensions)
+            for block in tp_gene:
 
-            # print("_create_vaqfile -> Dimension : ", block_count)
+                # print("_create_vaqfile -> Dimension : ", block_count)
 
-            # Loop over i in range(cells[block_count])
-            for i in range(self.ctx.cells[block_count]):
+                # Loop over i in range(cells[block_count])
+                for i in range(self.ctx.cells[block_count]):
 
-                l = self.ctx.boundary_vals[i, block_count]
-                r = self.ctx.boundary_vals[i + 1, block_count]
-                A = np.where(np.logical_and(block >= l, block < r))[0]
+                    l = self.ctx.boundary_vals[i, block_count]
+                    r = self.ctx.boundary_vals[i + 1, block_count]
+                    A = np.where(np.logical_and(block >= l, block < r))[0]
 
-                # MATLAB: Set CSET of those indices to the k-1. Effectively, if a record lies between the 1st and 2nd boundary value, assign it 
-                # to the 0th cells (as this is really the cell bounded by boundary values 1 and 2.)
-                # Python: Set it to k, rather than k-1. If it lies between boundary values 0 and 1, put it in cell 0.
-                self.cset[A] = i
+                    # MATLAB: Set CSET of those indices to the k-1. Effectively, if a record lies between the 1st and 2nd boundary value, assign it 
+                    # to the 0th cells (as this is really the cell bounded by boundary values 1 and 2.)
+                    # Python: Set it to k, rather than k-1. If it lies between boundary values 0 and 1, put it in cell 0.
+                    self.cset[A] = i
 
-            # Write CSET to vaq_handle_write
-            self.vaq_handle_write.write(self.cset)
+                # Write CSET to vaq_handle_write
+                # self.vaq_handle_write.write(self.cset)
+                f.write(self.cset)
 
-            block_count += 1
+                block_count += 1
 
-        print(self.ctx.boundary_vals[0,:])
+            print(self.ctx.boundary_vals[0,:])
         
         # Close vaqfile
-        self._close_file('vaq', 'wb')
+        # self._close_file('vaq', 'wb')
     
     # ----------------------------------------------------------------------------------------------------------------------------------------
     # Gives (num_vectors, 1) block of vaq_index; all data for a single dimension.    

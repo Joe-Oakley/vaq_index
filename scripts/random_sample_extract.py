@@ -70,12 +70,24 @@ class DataSet:
         self.full_fname_out = os.path.join(self.path, '') + self.fname + "_qry"
         self.full_fname_out_ids = self.full_fname_out 
 
+    # #----------------------------------------------------------------------------------------------------------------------------------------
+    # def _read_vector(self, vector_idx):
+
+    #     offset = 0
+    #     # vector_idx is the index of the required vector, assuming zero counting
+    #     offset = vector_idx * (self.num_dimensions + 1) * self.word_size
+
+    #     self.file_handle_in.seek(offset, os.SEEK_SET)
+    #     vector = np.fromfile(file=self.file_handle_in, count=(self.num_dimensions + 1), dtype=np.float32)
+
+    #     return vector
+
     #----------------------------------------------------------------------------------------------------------------------------------------
     def _read_vector(self, vector_idx):
 
-        offset = 0
+        # offset = int(0)
         # vector_idx is the index of the required vector, assuming zero counting
-        offset = vector_idx * (self.num_dimensions + 1) * self.word_size
+        offset = np.int64( np.int64(vector_idx) * np.int64(self.num_dimensions + 1) * np.int64(self.word_size) )
 
         self.file_handle_in.seek(offset, os.SEEK_SET)
         vector = np.fromfile(file=self.file_handle_in, count=(self.num_dimensions + 1), dtype=np.float32)
@@ -155,10 +167,16 @@ def main():
     # num_blocks = 1 
     # samples = 10 
 
-    path = Path('datasets/sift1m/')
-    fname = 'sift1m'    
+    # path = Path('datasets/sift1m/')
+    # fname = 'sift1m'    
+    # num_vectors = 1000000
+    # num_dimensions = 128
+    # samples = 10
+
+    path = Path('datasets/gist1m/')
+    fname = 'gist1m'    
     num_vectors = 1000000
-    num_dimensions = 128
+    num_dimensions = 960
     samples = 10
     
     dataset = DataSet(path, fname, num_vectors, num_dimensions, samples)

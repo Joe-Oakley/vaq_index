@@ -27,8 +27,8 @@ def main():
     # Params common across datasets
     #------------------------------
     # Todo: Add Rustam's argparse in this script
-    mode                    = 'Q'
-    create_qhist            = False
+    mode                    = 'F'
+    create_qhist            = True
     use_qhist               = False
     query_k                 = 10
     query_fname             = None
@@ -40,7 +40,7 @@ def main():
     non_uniform_bit_alloc   = True
     design_boundaries       = True
     dual_phase              = True
-    inmem_vaqdata           = True
+    inmem_vaqdata           = False
     relative_dist           = True
     
     #------------------------------
@@ -53,11 +53,11 @@ def main():
     # num_dimensions = 64
     # num_blocks = 7
     
-    # path = Path('datasets/siftsmall/')
-    # fname = 'siftsmall'
-    # num_vectors = 10000
-    # num_dimensions = 128
-    # num_blocks = 10
+    path = Path('datasets/siftsmall/')
+    fname = 'siftsmall'
+    num_vectors = 10000
+    num_dimensions = 128
+    num_blocks = 10
     
     # path = Path('datasets/ltest/')    
     # fname = 'ltest'
@@ -65,11 +65,17 @@ def main():
     # num_dimensions = 128
     # num_blocks = 1
 
-    path = Path('datasets/sift1m/')
-    fname = 'sift1m'
-    num_vectors = 1000000
-    num_dimensions = 128
-    num_blocks = 10
+    # path = Path('datasets/sift1m/')
+    # fname = 'sift1m'
+    # num_vectors = 1000000
+    # num_dimensions = 128
+    # num_blocks = 10
+
+    # path = Path('datasets/gist1m/')
+    # fname = 'gist1m'
+    # num_vectors = 1000000
+    # num_dimensions = 960
+    # num_blocks = 10
 
     # print("Checking num_blocks validity")
     if not check_block_count_validity(num_vectors, num_blocks):

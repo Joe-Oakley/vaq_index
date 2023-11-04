@@ -8,17 +8,6 @@ class DataSet:
     def __init__(self, ctx: QSession = None):
         self.ctx            = ctx
         self.full_fname     = None
-        self.file_handle    = None
-
-    # ----------------------------------------------------------------------------------------------------------------------------------------
-    def _open_file(self):
-        if self.file_handle is not None and not self.file_handle.closed:
-            self.file_handle.close()
-        self.file_handle = open(self.full_fname, mode="rb")
-
-    # ----------------------------------------------------------------------------------------------------------------------------------------
-    def _close_file(self):
-        self.file_handle.close()
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
     def _initialise(self):
@@ -26,15 +15,16 @@ class DataSet:
         self.full_fname = os.path.join(self.ctx.path, '') + self.ctx.fname
 
     #----------------------------------------------------------------------------------------------------------------------------------------
-    def _read_block(self, block_idx):
+    def _read_block(self, block_idx, f_handle):
 
         #(num_dims+1, block_size/(num_dims+1)) -> (num_dims, num_vectors_per_block) if all as float32
 
-        self.file_handle.seek(self.ctx.num_words_per_block*block_idx*self.ctx.word_size, os.SEEK_SET) # Multiply by word_size since seek wants a byte location.
+        # self.file_handle.seek(self.ctx.num_words_per_block*block_idx*self.ctx.word_size, os.SEEK_SET) # Multiply by word_size since seek wants a byte location.
+        f_handle.seek(self.ctx.num_words_per_block*block_idx*self.ctx.word_size, os.SEEK_SET) # Multiply by word_size since seek wants a byte location.
         if self.ctx.big_endian:
-            block = np.fromfile(file=self.file_handle, count=self.ctx.num_words_per_block, dtype=np.float32).byteswap(inplace=True)
+            block = np.fromfile(file=f_handle, count=self.ctx.num_words_per_block, dtype=np.float32).byteswap(inplace=True)
         else:
-            block = np.fromfile(file=self.file_handle, count=self.ctx.num_words_per_block, dtype=np.float32)
+            block = np.fromfile(file=f_handle, count=self.ctx.num_words_per_block, dtype=np.float32)
 
         block = np.reshape(block, (self.ctx.num_vectors_per_block, self.ctx.num_dimensions+1), order="C")
         block = np.delete(block, 0, 1)
@@ -67,14 +57,16 @@ class DataSet:
     # ----------------------------------------------------------------------------------------------------------------------------------------
     def _calc_dim_means(self):
 
-        self._open_file()
-        # Loop over number of blocks
-        for i in range(self.ctx.num_blocks):
-            block = self._read_block(i)
-            dim_sums = np.divide(np.sum(block, axis=0).reshape(1, self.ctx.num_dimensions), self.ctx.num_vectors_per_block)
-            self.ctx.dim_means = np.add(self.ctx.dim_means, dim_sums)
+        # self._open_file() 
 
-        self._close_file()
+        with open(self.full_fname, mode='rb') as f:
+        # Loop over number of blocks
+            for i in range(self.ctx.num_blocks):
+                block = self._read_block(i, f)
+                dim_sums = np.divide(np.sum(block, axis=0).reshape(1, self.ctx.num_dimensions), self.ctx.num_vectors_per_block)
+                self.ctx.dim_means = np.add(self.ctx.dim_means, dim_sums)
+
+        # self._close_file()
         # self.ctx.dim_means = np.divide(self.ctx.dim_means, self.ctx.num_blocks) # No longer casting to np.float32
         self.ctx.dim_means = np.divide(self.ctx.dim_means, self.ctx.num_blocks).astype(np.float32) # Oh yes it did
         
@@ -84,23 +76,24 @@ class DataSet:
     def _calc_cov_matrix(self):
         
         # Open file
-        self._open_file()
+        # self._open_file()
+        with open(self.full_fname, mode='rb') as f:
 
-        # Generate repmat(dim_means, 1, num_vectors_per_block)
-        rep_mean = np.tile(self.ctx.dim_means, (self.ctx.num_vectors_per_block, 1))  # (50,128)
+            # Generate repmat(dim_means, 1, num_vectors_per_block)
+            rep_mean = np.tile(self.ctx.dim_means, (self.ctx.num_vectors_per_block, 1))  # (50,128)
 
-        # Loop number of blocks
-        for i in range(self.ctx.num_blocks):
-            # Read block -> gives (num_dimensions, num_vectors_per_block) matrix
-            X = self._read_block(i)
+            # Loop number of blocks
+            for i in range(self.ctx.num_blocks):
+                # Read block -> gives (num_dimensions, num_vectors_per_block) matrix
+                X = self._read_block(i, f)
 
-            # Substract the repmat from block, put into new variable
-            Y = np.subtract(X, rep_mean)
+                # Substract the repmat from block, put into new variable
+                Y = np.subtract(X, rep_mean)
 
-            # Update cov matrix: C = C + Y*Y'
-            self.ctx.cov_matrix = self.ctx.cov_matrix + np.divide(np.matmul(Y.T, Y), self.ctx.num_vectors_per_block)
+                # Update cov matrix: C = C + Y*Y'
+                self.ctx.cov_matrix = self.ctx.cov_matrix + np.divide(np.matmul(Y.T, Y), self.ctx.num_vectors_per_block)
 
-        self._close_file()
+        # self._close_file()
 
         self.ctx.cov_matrix = np.divide(self.ctx.cov_matrix, self.ctx.num_blocks).astype(np.float32)
 

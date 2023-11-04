@@ -14,19 +14,6 @@ class QuerySet:
         self.full_res_fname         = None 
         self.full_metrics_fname     = None
 
-        self.query_handle_read      = None
-        self.query_handle_write     = None
-        self.query_handle_append    = None
-        self.res_handle_read        = None
-        self.res_handle_write       = None
-        self.res_handle_append      = None
-        self.metrics_handle_read    = None
-        self.metrics_handle_write   = None
-        self.metrics_handle_append  = None
-        self.qhist_handle_read      = None
-        self.qhist_handle_write     = None
-        self.qhist_handle_append    = None
-
         # Can't initialize these until _open_query_file()
         self.Q              = None # Query set
         self.num_queries    = None 
@@ -44,102 +31,6 @@ class QuerySet:
         self.U      = None
         self.S1     = None
         self.S2     = None
-
-    # ----------------------------------------------------------------------------------------------------------------------------------------    
-    def _open_file(self, ftype, mode):
-
-        if ftype == 'qry':
-            if mode == 'rb':
-                self.query_handle_read = open(self.full_query_fname, mode=mode)
-            elif mode == 'wb':
-                self.query_handle_write = open(self.full_query_fname, mode=mode)
-            elif mode == 'ab':
-                self.query_handle_append = open(self.full_query_fname, mode=mode)
-            else:
-                raise ValueError("Invalid mode selected: ", mode)
-        elif ftype == 'res':
-            if mode == 'rb':
-                self.res_handle_read = open(self.full_res_fname, mode=mode)
-            elif mode == 'wb':
-                self.res_handle_write = open(self.full_res_fname, mode=mode)
-            elif mode == 'ab':
-                self.res_handle_append = open(self.full_res_fname, mode=mode)
-            else:
-                raise ValueError("Invalid mode selected: ", mode)
-        elif ftype == 'met':
-            if mode == 'rb':
-                self.metrics_handle_read = open(self.full_metrics_fname, mode=mode)
-            elif mode == 'wb':
-                self.metrics_handle_write = open(self.full_metrics_fname, mode=mode)
-            elif mode == 'ab':
-                self.metrics_handle_append = open(self.full_metrics_fname, mode=mode)    
-            else:
-                raise ValueError("Invalid mode selected: ", mode)
-        elif ftype == 'qhist':
-            if mode == 'rb':
-                self.qhist_handle_read = open(self.ctx.qhist_fname, mode=mode)
-            elif mode == 'wb':
-                self.qhist_handle_write = open(self.ctx.qhist_fname, mode=mode)
-            elif mode == 'ab':
-                self.qhist_handle_append = open(self.ctx.qhist_fname, mode=mode)
-            else:
-                raise ValueError("Invalid mode selected: ", mode)
-        else:
-            raise ValueError("Invalid ftype selected: ", ftype)
-
-    # ----------------------------------------------------------------------------------------------------------------------------------------
-    def _close_file(self, ftype, mode): # ftypes: qry, res, met, qhist. modes: 'rb', 'wb', 'ab'
-
-        if ftype == 'qry':
-            if mode == 'rb':
-                self.query_handle_read.close()
-                self.query_handle_read = None
-            elif mode == 'wb':
-                self.query_handle_write.close()
-                self.query_handle_write = None
-            elif mode == 'ab':
-                self.query_handle_append.close()
-                self.query_handle_append = None
-            else:
-                raise ValueError("Invalid mode selected: ", mode)
-        elif ftype == 'res':
-            if mode == 'rb':
-                self.res_handle_read.close()
-                self.res_handle_read = None
-            elif mode == 'wb':
-                self.res_handle_write.close()
-                self.res_handle_write = None
-            elif mode == 'ab':
-                self.res_handle_append.close()
-                self.res_handle_append = None
-            else:
-                raise ValueError("Invalid mode selected: ", mode)
-        elif ftype == 'met':
-            if mode == 'rb':
-                self.metrics_handle_read.close()
-                self.metrics_handle_read = None
-            elif mode == 'wb':
-                self.metrics_handle_write.close()
-                self.metrics_handle_write = None
-            elif mode == 'ab':
-                self.metrics_handle_append.close()
-                self.metrics_handle_append = None
-            else:
-                raise ValueError("Invalid mode selected: ", mode)
-        elif ftype == 'qhist':
-            if mode == 'rb':
-                self.qhist_handle_read.close()
-                self.qhist_handle_read = None
-            elif mode == 'wb':
-                self.qhist_handle_write.close()
-                self.qhist_handle_write = None
-            elif mode == 'ab':
-                self.qhist_handle_append.close()
-                self.qhist_handle_append = None
-            else:
-                raise ValueError("Invalid mode selected: ", mode)
-        else:
-            raise ValueError("Invalid ftype selected: ", ftype)
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
     def _initialize(self):
@@ -163,25 +54,27 @@ class QuerySet:
         # print("****************************************")
 
         # Read all queries into memory at once. Don't know how many; use -1 to get number of queries.
-        self._open_file('qry', 'rb')
+        # self._open_file('qry', 'rb')
+        with open(self.full_query_fname, mode='rb') as f:
 
-        # Should have run change_ends.py before this, so endianness shouldn't be a factor.
-        if self.ctx.big_endian:
-            queries = np.fromfile(file=self.query_handle_read, count=-1, dtype=np.float32).byteswap(inplace=True)
-        else:
-            queries = np.fromfile(file=self.query_handle_read, count=-1, dtype=np.float32)
+            # Should have run change_ends.py before this, so endianness shouldn't be a factor.
+            if self.ctx.big_endian:
+                # queries = np.fromfile(file=self.query_handle_read, count=-1, dtype=np.float32).byteswap(inplace=True)
+                queries = np.fromfile(file=f, count=-1, dtype=np.float32).byteswap(inplace=True)
+            else:
+                queries = np.fromfile(file=f, count=-1, dtype=np.float32)
 
-        # Reshape and trim identifiers
-        print("queries shape before reshape + trim identifiers: ", np.shape(queries))
-        queries = np.reshape(queries, (-1, self.ctx.num_dimensions+1), order="C")
-        queries = np.delete(queries, 0, 1)
-        print("queries shape after reshape + trim identifiers: ", np.shape(queries))
-        
-        # Set up remaining variables
-        self.Q = queries
-        self.num_queries = np.shape(queries)[0]
-        self.first_stage = np.zeros((self.num_queries), dtype=np.uint32)
-        self.second_stage = np.zeros((self.num_queries), dtype=np.uint32)        
+            # Reshape and trim identifiers
+            print("queries shape before reshape + trim identifiers: ", np.shape(queries))
+            queries = np.reshape(queries, (-1, self.ctx.num_dimensions+1), order="C")
+            queries = np.delete(queries, 0, 1)
+            print("queries shape after reshape + trim identifiers: ", np.shape(queries))
+            
+            # Set up remaining variables
+            self.Q = queries
+            self.num_queries = np.shape(queries)[0]
+            self.first_stage = np.zeros((self.num_queries), dtype=np.uint32)
+            self.second_stage = np.zeros((self.num_queries), dtype=np.uint32)        
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
     # Perform transform on self.Q: Q=(Q-repmat(DATA_MEAN',QUERY_FILE_SIZE,1))*KLT';
@@ -214,43 +107,52 @@ class QuerySet:
     def _write_qhist_info(self, mode, query_idx=None): # File size (bytes) = word_size + num_queries(4*word_size + word_size(2*query_k))
 
         # Open file
-        self._open_file('qhist', 'ab')
+        # self._open_file('qhist', 'ab')
+        with open(self.ctx.qhist_fname, mode='ab') as f:
 
-        if mode == 'start':
-            self.qhist_handle_append.write(np.uint32(self.num_queries))
-            print("np.uint32(self.num_queries): ", str(np.uint32(self.num_queries)))
-        elif mode == 'main':
-            # Write Query ID, query_k, phase 1 elims, phase 2 visits
-            self.qhist_handle_append.write(np.uint32(query_idx))
-            self.qhist_handle_append.write(np.uint32(self.ctx.query_k))
-            self.qhist_handle_append.write(np.uint32(self.first_stage[query_idx]))
-            self.qhist_handle_append.write(np.uint32(self.second_stage[query_idx]))
+            if mode == 'start':
+                # self.qhist_handle_append.write(np.uint32(self.num_queries))
+                f.write(np.uint32(self.num_queries))
+                print("np.uint32(self.num_queries): ", str(np.uint32(self.num_queries)))
+            elif mode == 'main':
+                # Write Query ID, query_k, phase 1 elims, phase 2 visits
+                # self.qhist_handle_append.write(np.uint32(query_idx))
+                # self.qhist_handle_append.write(np.uint32(self.ctx.query_k))
+                # self.qhist_handle_append.write(np.uint32(self.first_stage[query_idx]))
+                # self.qhist_handle_append.write(np.uint32(self.second_stage[query_idx]))
+                f.write(np.uint32(query_idx))
+                f.write(np.uint32(self.ctx.query_k))
+                f.write(np.uint32(self.first_stage[query_idx]))
+                f.write(np.uint32(self.second_stage[query_idx]))
 
-            # Write k pairs of (NN vector ID, Euclidean distance to query point)
-            for j in range(self.ctx.query_k):
-                self.qhist_handle_append.write(np.float32(self.V[j])) # Really an int, but using float for ease of reading back in.
-                self.qhist_handle_append.write(np.float32(self.ANS[j]))
-        else:
-            raise ValueError("Invalid mode selected: ", mode)
+                # Write k pairs of (NN vector ID, Euclidean distance to query point)
+                for j in range(self.ctx.query_k):
+                    # self.qhist_handle_append.write(np.float32(self.V[j])) # Really an int, but using float for ease of reading back in.
+                    # self.qhist_handle_append.write(np.float32(self.ANS[j]))
+                    f.write(np.float32(self.V[j])) # Really an int, but using float for ease of reading back in.
+                    f.write(np.float32(self.ANS[j]))
+            else:
+                raise ValueError("Invalid mode selected: ", mode)
 
         # Close file
-        self._close_file('qhist', 'ab')
+        # self._close_file('qhist', 'ab')
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
     # Res file size (bytes) = word_size * 2 (i.e. V, ANS) * self.ctx.query_k * self.num_queries.
     def _write_res_info(self): # Called once per query. 
     
         # Open res file (mode append)
-        self._open_file('res', 'ab')
+        # self._open_file('res', 'ab')
+        with open(self.full_res_fname, mode='ab') as f:
 
-        # Write self.V and self.ANS (refreshed per-query.)
-        for i in range(self.ctx.query_k):
-            self.res_handle_append.write(np.uint32(self.V[i])) # uint32
-            self.res_handle_append.write(np.float32(self.ANS[i])) # float32
+            # Write self.V and self.ANS (refreshed per-query.)
+            for i in range(self.ctx.query_k):
+                f.write(np.uint32(self.V[i])) # uint32
+                f.write(np.float32(self.ANS[i])) # float32
 
         # Close res file
         # self._close_file(self.res_handle_append)
-        self._close_file('res', 'ab')
+        # self._close_file('res', 'ab')
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
     def _print_res_info(self, query_idx):
@@ -269,14 +171,15 @@ class QuerySet:
     def _write_metrics_info(self): # Write metrics info for all queries.
 
         # Open metrics file
-        self._open_file('met', 'wb')
+        # self._open_file('met', 'wb')
+        with open(self.full_metrics_fname, 'wb') as f:
 
-        # Write first stage and second stage
-        self.metrics_handle_write.write(self.first_stage) # (num_queries, 1), uint32
-        self.metrics_handle_write.write(self.second_stage) # (num_queries, 1), uint32
+            # Write first stage and second stage
+            f.write(self.first_stage) # (num_queries, 1), uint32
+            f.write(self.second_stage) # (num_queries, 1), uint32
 
         # Close metrics file
-        self._close_file('met', 'wb')
+        # self._close_file('met', 'wb')
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
     def _print_metrics_info(self):
