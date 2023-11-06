@@ -271,7 +271,8 @@ class QuerySet:
                 # msg = 'Query ' + str(query_idx) + ' Dim ' + str(block_count) + ' Chunk ' + str(i) + ' Populating S1/S2 chunk'
                 # self.ctx.debug_timer('QuerySet._run_phase_one', qblock_reft, msg, 2)
 
-            x = np.logical_not(CSET == R).astype(np.int32)
+            # x = np.logical_not(CSET == R).astype(np.int32)
+            x = np.logical_not(CSET == R).astype(np.float32)
 
             # Calculate L (lower bound): L=L+x.*S1;    L is (num_vectors, 1).
             # Adds the lower bound distance for the dimension in question, to a running total which becomes the overall (squared) lower bound distance. 
@@ -378,7 +379,9 @@ class QuerySet:
             
             # vaqdata is (num_vectors, num_dimensions)
             RSET = self.ctx.VAQ.vaqdata[(blockno*num_vectors_per_block):((blockno+1)*num_vectors_per_block), :]
-            x = np.logical_not(RSET == R_cells).astype(np.int32)    
+
+            # x = np.logical_not(RSET == R_cells).astype(np.int32)
+            x = np.logical_not(RSET == R_cells).astype(np.float32)    
             
             # 23/10/2023    Use RSET values to index into the distances array created for the query
             dmin = np.take_along_axis(D_MIN, RSET, axis=0) # Uses RSET values to index into D_MIN. dmin same shape as RSET, but contains distances.
@@ -483,7 +486,8 @@ class QuerySet:
             reft = timeit.default_timer()
 
             if self.ctx.inmem_vaqdata:
-                self._run_phase_one_inmem(i)
+                # self._run_phase_one_inmem(i) # Full in-mem
+                self._run_phase_one(i) # Partial in-mem
             else:
                 self._run_phase_one(i)
 

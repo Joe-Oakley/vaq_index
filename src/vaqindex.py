@@ -299,8 +299,9 @@ class VAQIndex:
 
             # Stopping condition check
             # print("((delta - delta_new)/delta) -> ", ((delta - delta_new)/delta))
-            if ((delta - delta_new) / delta) < stop:
-                # print("Number of Lloyd's iterations: ", str(num_lloyd_iterations))
+            # if ((delta - delta_new) / delta) < stop:
+            if ( ((delta - delta_new) / delta) < VAQIndex.LLOYD_STOP ) or ( num_lloyd_iterations >= VAQIndex.MAX_LLOYD_ITERATIONS ):
+                print("Number of Lloyd's iterations: ", str(num_lloyd_iterations))
                 return r, c
             delta = delta_new
 
@@ -315,7 +316,7 @@ class VAQIndex:
 
         # Init variables
         delta = np.inf
-        stop = 0.001
+        # stop = 0.001
         c = boundary_vals_in
         M1 = np.min(boundary_vals_in)
         M2 = np.max(boundary_vals_in)
@@ -443,7 +444,7 @@ class VAQIndex:
         while block_idx < self.ctx.num_dimensions:
             
             # yield self.vaqdata[:,block_idx].reshape((self.ctx.num_vectors, 1))
-            yield self.vaqdata[:,block_idx].reshape(self.ctx.num_vectors,1)
+            yield self.vaqdata[:,block_idx].reshape(self.ctx.num_vectors)
             block_idx += 1
     
     # ----------------------------------------------------------------------------------------------------------------------------------------
