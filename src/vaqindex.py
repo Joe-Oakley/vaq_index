@@ -9,7 +9,10 @@ from qsession import QSession
 class VAQIndex:
     MAX_UINT8 = 255
     MAX_LLOYD_ITERATIONS = 75    
-    LLOYD_STOP = 0.005  
+    LLOYD_STOP = 0.005
+    # WEIGHTING_FACTOR = 0.001
+    # WEIGHTING_FACTOR = 0.01
+    WEIGHTING_FACTOR = 0.1  
 
     def __init__(self, ctx: QSession = None):
         self.ctx                  = ctx
@@ -35,7 +38,7 @@ class VAQIndex:
             assert self.ctx.bit_budget % self.ctx.num_dimensions == 0, "Bit budget cannot be evenly divided among dimensions (uniform bit allocation)."
             
         # For query-only runs, load CELLS and BOUNDARY_VALS from file saved during VAQ build
-        if self.ctx.mode == 'Q':
+        if self.ctx.mode in ('Q','P'):
             self._load_vaq_vars()
 
             # If in-memory vaq file requested for mode Q, load it now.
@@ -105,7 +108,7 @@ class VAQIndex:
         # Instantiate weights array: np ones, (num_vectors, 1)
         self.weights = np.ones(self.ctx.num_vectors, dtype=np.float32)
 
-        print("weights before: " , self.weights)
+        # print("weights before: " , self.weights)
 
         # Open qhist file (read)
         # self._open_file('qhist', 'rb')
@@ -116,48 +119,83 @@ class VAQIndex:
 
             # self.qhist_handle_read.seek(byte_counter, os.SEEK_SET) # Seek takes a byte counter
             # num_queries_qhist = np.fromfile(file=self.qhist_handle_read, count=1, dtype=np.uint32)[0] # Count is in words
-            f.seek(byte_counter, os.SEEK_SET) # Seek takes a byte counter
-            num_queries_qhist = np.fromfile(file=f, count=1, dtype=np.uint32)[0] # Count is in words
+            # f.seek(byte_counter, os.SEEK_SET) # Seek takes a byte counter
+            # num_queries_qhist = np.fromfile(file=f, count=1, dtype=np.uint32)[0] # Count is in words
+            # byte_counter += self.ctx.word_size
 
-            byte_counter += self.ctx.word_size
+            # Query History file may contain outputs from multiple query runs. Process until end of file reached.
+            while f.tell() < os.fstat(f.fileno()).st_size:
 
-            for i in range(num_queries_qhist):
+                f.seek(byte_counter, os.SEEK_SET) # Seek takes a byte counter
+                num_queries_qhist = np.fromfile(file=f, count=1, dtype=np.uint32)[0] # Count is in words
+                byte_counter += self.ctx.word_size
 
-                # Read 4 words (np.fromfile): query_id, query_k, phase 1 elims, phase 2 visits
-                # self.qhist_handle_read.seek(byte_counter, os.SEEK_SET)
-                # q_info = np.fromfile(file=self.qhist_handle_read, count = 4, dtype=np.uint32)
-                f.seek(byte_counter, os.SEEK_SET)
-                q_info = np.fromfile(file=f, count = 4, dtype=np.uint32)
+                for i in range(num_queries_qhist):
 
-                q_info = np.reshape(q_info, (4,1), order="C")
-                q_id, q_k, q_p1, q_p2 = q_info[0,0], q_info[1,0], q_info[2,0], q_info[3,0] 
-                byte_counter += 4 * self.ctx.word_size
+                    # Read 4 words (np.fromfile): query_id, query_k, phase 1 elims, phase 2 visits
+                    # self.qhist_handle_read.seek(byte_counter, os.SEEK_SET)
+                    # q_info = np.fromfile(file=self.qhist_handle_read, count = 4, dtype=np.uint32)
+                    f.seek(byte_counter, os.SEEK_SET)
+                    q_info = np.fromfile(file=f, count = 4, dtype=np.uint32)
 
-                # Read next (2*query_k) words (np.fromfile) -> reshape into (k, 2) distances matrix, probably order C
-                # self.qhist_handle_read.seek(byte_counter, os.SEEK_SET)
-                # distances = np.fromfile(file=self.qhist_handle_read, count = 2*q_k, dtype=np.float32)
-                f.seek(byte_counter, os.SEEK_SET)
-                distances = np.fromfile(file=f, count = 2*q_k, dtype=np.float32)
+                    q_info = np.reshape(q_info, (4,1), order="C")
+                    q_id, q_k, q_p1, q_p2 = q_info[0,0], q_info[1,0], q_info[2,0], q_info[3,0] 
+                    byte_counter += 4 * self.ctx.word_size
 
-                distances = np.reshape(distances, (q_k, 2), order='C')
-                byte_counter += 2 * q_k * self.ctx.word_size
+                    # Read next (2*query_k) words (np.fromfile) -> reshape into (k, 2) distances matrix, probably order C
+                    # self.qhist_handle_read.seek(byte_counter, os.SEEK_SET)
+                    # distances = np.fromfile(file=self.qhist_handle_read, count = 2*q_k, dtype=np.float32)
+                    f.seek(byte_counter, os.SEEK_SET)
+                    distances = np.fromfile(file=f, count = 2*q_k, dtype=np.float32)
 
-                # Loop over rows k of distances matrix
-                for j in range(q_k):
+                    distances = np.reshape(distances, (q_k, 2), order='C')
+                    byte_counter += 2 * q_k * self.ctx.word_size
+
+                    # # Loop over rows k of distances matrix
+                    # for j in range(q_k):
+
+                    #     # Calculate query visit ratio for this query
+                    #     qvr = np.divide(q_p2, q_k)
+
+                    #     # Update self.weights[k]
+                    #     vector_id = int(distances[j,0])
+
+                    #     if self.ctx.relative_dist:
+                    #         # if distances[0,1] > 0: 
+                    #         if not self._fleq(distances[0,1], 0):
+                    #             self.weights[vector_id] += (np.divide(distances[0,1], distances[j,1]) * self.ctx.q_lambda * qvr)
+                    #         else:
+                    #             self.weights[vector_id] += (np.divide(0.001, distances[j,1]) * self.ctx.q_lambda * qvr)
+                    #     else:
+                    #         self.weights[vector_id] += self.ctx.q_lambda * qvr
+                            
 
                     # Calculate query visit ratio for this query
                     qvr = np.divide(q_p2, q_k)
+                    
+                    # Obtain range of distances for this query
+                    distance_range = np.subtract(distances[q_k-1,1], distances[0,1])                     
+                        
+                    # Loop over rows k of distances matrix
+                    for j in range(q_k):
 
-                    # Update self.weights[k]
-                    vector_id = int(distances[j,0])
+                        # Update self.weights[k]
+                        vector_id = int(distances[j,0])
 
-                    if self.ctx.relative_dist:
-                        if distances[0,1] > 0: 
-                            self.weights[vector_id] += (np.divide(distances[0,1], distances[j,1]) * self.ctx.q_lambda * qvr)
-                        else:
-                            self.weights[vector_id] += (np.divide(0.001, distances[j,1]) * self.ctx.q_lambda * qvr)
-                    else:
-                        self.weights[vector_id] += self.ctx.q_lambda * qvr
+                        if self.ctx.relative_dist:
+                            
+                            # Allocate weight percentage from smallest distance to largest, in proportion to the range
+                            # weight = 1 - np.divide(distances[j,1],distance_range)
+                            # self.weights[vector_id] += VAQIndex.WEIGHTING_FACTOR * weight * qvr
+                            
+                            weight = np.divide(distances[j,1],distance_range)
+                            self.weights[vector_id] += VAQIndex.WEIGHTING_FACTOR * weight
+                                
+                        else:   # Not relative distance. Allocate weight percentage relative to position in q_k
+                            weight = (1 - np.divide(j,q_k))
+                            self.weights[vector_id] += VAQIndex.WEIGHTING_FACTOR * weight * qvr    
+    
+    
 
         # print("weights after: " , self.weights)
         # print("mean of weights after: ", np.mean(self.weights))
@@ -241,8 +279,8 @@ class VAQIndex:
             # MATLAB has B(1:CELLS(i)+1, i). Say a dim has 4 cells, this goes from 1 to 5, inclusive.
             # Ours will go from 0 to 5, not inclusive at the top, so really 0,1,2,3,4. Therefore equivalent. 
             if self.ctx.use_qhist:
-                # r, c = self._weighted_lloyd(block, self.ctx.boundary_vals[0:cells_for_dim+1, block_count])
-                r, c = self._lloyd(block, self.ctx.boundary_vals[0:cells_for_dim+1, block_count])
+                r, c = self._weighted_lloyd(block, self.ctx.boundary_vals[0:cells_for_dim+1, block_count])
+                # r, c = self._lloyd(block, self.ctx.boundary_vals[0:cells_for_dim+1, block_count])
             else:
                 r, c = self._lloyd(block, self.ctx.boundary_vals[0:cells_for_dim+1, block_count])
 
@@ -262,7 +300,7 @@ class VAQIndex:
 
         # Init variables
         delta = np.inf
-        stop = 0.001
+        # stop = 0.001
         c = boundary_vals_in
         M1 = np.min(boundary_vals_in)
         M2 = np.max(boundary_vals_in)
@@ -293,9 +331,11 @@ class VAQIndex:
             r = np.sort(r)
 
             # Update boundary values based on representative values
-            for j in range(1, num_boundary_vals):  # MATLAB has a -1 here... don't think we need?   
+            # for j in range(1, num_boundary_vals):  # MATLAB has a -1 here... don't think we need?   YES WE DO! Otherwise lose top boundary
+            for j in range(1, num_boundary_vals - 1):
 
                 c[j] = (r[j - 1] + r[j]) / 2
+
 
             # Stopping condition check
             # print("((delta - delta_new)/delta) -> ", ((delta - delta_new)/delta))
@@ -323,7 +363,7 @@ class VAQIndex:
         num_boundary_vals = np.shape(boundary_vals_in)[0]
         r = np.zeros(num_boundary_vals, dtype=np.float32)
 
-        print("self.weights: ", self.weights)
+        # print("self.weights: ", self.weights)
 
         num_lloyd_iterations = 0
         while True:
@@ -338,23 +378,30 @@ class VAQIndex:
                 # Find values in block between boundary values; np.where?
                 idxs = np.where(np.logical_and(block >= c[i], block < c[i + 1]))[0]
 
-                X_i = block[idxs]
-                W_i = self.weights[idxs]
+                X = block[idxs]
+                W = self.weights[idxs]
+                W_sum = np.sum(W)
+                X_weighted = np.multiply(W,X.ravel())
+                X_weighted_sum = np.sum(X_weighted)
 
                 # If any values found
-                if np.shape(X_i)[0] > 0:
-                    r[i] = np.divide(np.sum(np.multiply(W_i, X_i)), np.sum(W_i))
+                if np.shape(X)[0] > 0:
+                    # r[i] = np.divide(np.sum(np.multiply(W, X)), np.sum(W))
+                    r[i] = np.divide(X_weighted_sum, W_sum)
                 else:
                     r[i] = np.random.rand(1) * (M2 - M1) + M1
 
                 # Add representation error over current interval to delta_new
-                delta_new += np.sum(np.square(np.multiply(W_i, X_i) - r[i]))
+                # delta_new += np.sum(np.square(np.multiply(W_i, X_i) - r[i]))
+                # delta_new += np.sum(np.square(X_weighted_sum - r[i]))
+                delta_new += np.sum(np.square(X_weighted - r[i]))
 
             # Sort representative values - todo: sorting algorithm selection
             r = np.sort(r)
 
             # Update boundary values based on representative values
-            for j in range(1, num_boundary_vals):  # MATLAB has a -1 here... don't think we need?   
+            # for j in range(1, num_boundary_vals):  # MATLAB has a -1 here... don't think we need?   YES WE DO! Otherwise lose top boundary
+            for j in range(1, num_boundary_vals - 1):
 
                 c[j] = (r[j - 1] + r[j]) / 2
 
@@ -374,7 +421,7 @@ class VAQIndex:
     def _create_vaqfile(self):
 
         # Could init this in loop?
-        self.cset = np.ones(self.ctx.num_vectors, dtype=np.uint8)
+        # self.cset = np.ones(self.ctx.num_vectors, dtype=np.uint8)
 
         # Setup tp generator
         tp_gene = self.ctx.TDS.generate_tp_block()
@@ -388,6 +435,8 @@ class VAQIndex:
 
             # Loop over tp blocks (i.e. loop over dimensions)
             for block in tp_gene:
+
+                self.cset = np.ones(self.ctx.num_vectors, dtype=np.uint8)
 
                 # print("_create_vaqfile -> Dimension : ", block_count)
 
@@ -409,7 +458,7 @@ class VAQIndex:
 
                 block_count += 1
 
-            print(self.ctx.boundary_vals[0,:])
+            # print(self.ctx.boundary_vals[0,:])
         
         # Close vaqfile
         # self._close_file('vaq', 'wb')
@@ -446,6 +495,25 @@ class VAQIndex:
             # yield self.vaqdata[:,block_idx].reshape((self.ctx.num_vectors, 1))
             yield self.vaqdata[:,block_idx].reshape(self.ctx.num_vectors)
             block_idx += 1
+    
+    # ----------------------------------------------------------------------------------------------------------------------------------------
+    # Read one vector from VAQIndex.  
+    def _read_vaq_vector(self, vec_id=None):
+
+        # If inmem_vaqdata, simply read from array.    
+        if self.ctx.inmem_vaqdata:
+            return self.vaqdata[vec_id,:]
+        
+        # Otherwise read from disk (needs a loop as stored by dimension, not vector)
+        qvec = np.zeros(self.ctx.num_dimensions, dtype=np.uint8)
+        with open(self.full_vaq_fname, mode="rb") as f:
+            
+            for dim_no in range(self.ctx.num_dimensions):
+                offset = (dim_no * self.ctx.num_vectors) + vec_id
+                f.seek(offset, os.SEEK_SET)
+                qvec[dim_no] = np.fromfile(file=f, count=1, dtype=np.uint8)
+
+        return qvec   
     
     # ----------------------------------------------------------------------------------------------------------------------------------------
     def _save_vaq_vars(self):
@@ -513,13 +581,111 @@ class VAQIndex:
             self._load_vaqdata()
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
-    def load(self):
-        pass
+    # Mode R: Full rebuild of VAQ file
+    def rebuild(self):
+                
+        if self.ctx.mode != 'R':
+            print('VAQIndex rebuild called with inappropriate Mode : ',self.ctx.mode)
+            exit(1)
+        
+        # Load CELLS data (ignore BOUNDARY_VALS - will be re-initialised)
+        self._load_vaq_vars()
 
-    # #----------------------------------------------------------------------------------------------------------------------------------------
-    # def vaq_generate_column(self):
-    #     pass
+        # Take copy of current boundary vals for comparison
+        bv_before = np.copy(self.ctx.boundary_vals)
 
-    # #----------------------------------------------------------------------------------------------------------------------------------------
-    # def vaq_generate_column_memory(self):
-    #     pass
+        # Assign weights (only if using qhist)
+        if self.ctx.use_qhist:
+            self._assign_weights()
+
+        # Init boundary values
+        self._init_boundaries()
+
+        # Design boundary values (with Lloyd's)
+        if self.ctx.design_boundaries:
+            self._design_boundaries()
+
+        # See if boundary vals have changed
+        self._compare_boundary_vals(bv_before, self.ctx.boundary_vals)
+
+        # Save cells and boundary_vals for use elsewhere
+        self._save_vaq_vars()
+
+        # Create vaqfile
+        self._create_vaqfile()
+
+    # ----------------------------------------------------------------------------------------------------------------------------------------
+    # Compare two sets of boundary values
+    def _compare_boundary_vals(self, bv1, bv2):
+        
+        if not self.ctx.DEBUG:
+            return
+        
+        if bv1.shape != bv2.shape:
+            print('First boundary array is ', bv1.shape, ' Second boundary array is ', bv2.shape, ' MISMATCH!')
+            exit(1)
+        
+        rtol = 1e-05
+        atol = 1e-08
+        if np.allclose(bv1, bv2, rtol, atol, equal_nan=True):
+            print()
+            print("Boundary Value sets match!")
+            print()
+            return
+        
+        # At least one mismatch. Loop through dims and identify changed values
+        np.set_printoptions(suppress=True)
+        for dim in range(bv1.shape[1]):
+            if not np.allclose(bv1[:,dim], bv2[:,dim], rtol, atol, True):
+                wanted = np.invert(np.isclose(bv1[:,dim], bv2[:,dim], rtol, atol, True))
+                bv1_unmatched = bv1[wanted, dim]
+                bv2_unmatched = bv2[wanted, dim]
+                print('Dimension : ', dim, '  -> Boundary Vals mismatched')
+                print('Before:')
+                print(bv1_unmatched.T)
+                print('After:')
+                print(bv2_unmatched.T)
+                print()
+        
+    
+    # ----------------------------------------------------------------------------------------------------------------------------------------
+    # Compare two floats for almost-equalness
+    def _fleq(self, fl1, fl2):
+        rtol = 1e-05
+        atol = 1e-08
+        return np.isclose(fl1, fl2, rtol, atol, True)
+
+    #----------------------------------------------------------------------------------------------------------------------------------------
+    # Print details of one or more vectors
+    def prvd(self):
+
+        # Loop over requested vectors
+        for vec_id in self.ctx.vecs_to_print:
+            
+            print("Details for Vector ID : ", vec_id)
+            print()
+                    
+            # Read vector from TransformedDataSet
+            start_offset = vec_id * self.ctx.num_dimensions * self.ctx.word_size
+            tvec = self.ctx.TDS.tf_random_read(start_offset, self.ctx.num_dimensions) 
+                        
+            # Read quantised vector from VAQIndex
+            qvec = self._read_vaq_vector(vec_id)
+            
+            print('{:^4s}     {:^10s} {:^4s}     {:<10s}      {:<10s}   {:<10s}  {:>20s} '.format('Dim', 'tvec', 'qvec', 'Boundary', 'LB', 'UB', 'Surrounding Boundaries'))
+            # Loop over Dimensions            
+            for dim_no in range(self.ctx.num_dimensions):
+                boundary_start = (qvec[dim_no] - 4) if (qvec[dim_no] - 4) > 0 else 0
+                boundary_stop  = (qvec[dim_no] + 5) if (qvec[dim_no] + 5) <= self.ctx.num_dimensions else self.ctx.num_dimensions + 1
+                B1 = np.abs(np.subtract(tvec[0,dim_no], self.ctx.boundary_vals[qvec[dim_no], dim_no]))
+                B2 = np.abs(np.subtract(tvec[0,dim_no], self.ctx.boundary_vals[qvec[dim_no]+1, dim_no]))
+                LB = min(B1,B2)
+                UB = max(B1,B2)
+                # print('{:^4d}   {:>10.4f} {:>4d}    {:>10.4f}      '.format(dim_no, tvec[0,dim_no], qvec[dim_no], self.ctx.boundary_vals[qvec[dim_no], dim_no]), end='')
+                
+                print('{:^4d}   {:>10.4f} {:>4d}    {:>10.4f}   {:>10.4f}  {:>10.4f}         '.format(dim_no, tvec[0,dim_no], qvec[dim_no], self.ctx.boundary_vals[qvec[dim_no], dim_no], LB, UB), end='')
+                print(self.ctx.boundary_vals[boundary_start:boundary_stop, dim_no])
+            
+            print()
+                
+    #----------------------------------------------------------------------------------------------------------------------------------------

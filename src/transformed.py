@@ -147,7 +147,7 @@ class TransformedDataSet:
     # Gives (num_vectors, 1) block of tp; all data for a single dimension.
     def generate_tp_block(self, start_offset=0):
 
-        if self.ctx.mode in ('F','B'):
+        if self.ctx.mode in ('F','B','R'):
 
             block_idx = start_offset
 

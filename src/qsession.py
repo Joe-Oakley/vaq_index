@@ -10,7 +10,7 @@ class QSession:
     DEBUG = True
     
     def __init__(self, path, fname, mode = "B", create_qhist=True, use_qhist=True, query_k=2, query_fname=None, qhist_fname=None, num_vectors=None, num_dimensions=None, num_blocks=1, word_size=4, big_endian=False, \
-                 q_lambda=1, bit_budget=0, non_uniform_bit_alloc=True, design_boundaries=True, dual_phase=True, inmem_vaqdata=False, relative_dist = True):
+                 q_lambda=1, bit_budget=0, non_uniform_bit_alloc=True, design_boundaries=True, dual_phase=True, inmem_vaqdata=False, relative_dist = True, vecs_to_print = None):
         
         self.path                   = path
         self.fname                  = fname
@@ -32,6 +32,7 @@ class QSession:
         self.dual_phase             = dual_phase
         self.inmem_vaqdata          = inmem_vaqdata
         self.relative_dist          = relative_dist
+        self.vecs_to_print          = vecs_to_print
 
         np.set_printoptions(linewidth=200)
                 
@@ -58,7 +59,7 @@ class QSession:
         # Basic validations
         assert os.path.isdir(self.path), "Path entered : " + self.path + " does not exist!"
         assert (self.total_file_words / self.num_blocks) % (self.num_dimensions + 1) == 0, "Inconsistent number of blocks selected."
-        assert self.mode in ('F','B','Q'), "Mode must be one of F, B or Q"
+        assert self.mode in ('F','B','Q','R','P'), "Mode must be one of F, B, Q, R or P"
         assert self.query_k > 0, "query_k must be > 0"
         assert self.num_vectors > 0, "num_vectors must be greater than 0"
         assert self.num_dimensions > 0, "num_dimensions must be greater than 0"
@@ -66,6 +67,9 @@ class QSession:
         assert self.word_size > 0, "word_size must be greater than 0"
         assert self.q_lambda >= 0, "q_lambda must be greater than or equal to 0"
         assert self.bit_budget > 0, "bit_budget must be greater than 0"
+        if self.mode == 'P' and self.vecs_to_print == None:
+            print('Mode P requires a list of Vector IDs to be provided!')
+            exit(1)
         
         # Print floating-point numbers using a fixed point notation
         np.set_printoptions(suppress=True)
@@ -151,7 +155,7 @@ class QSession:
                 print()
 
         # Mode Q : QUERY -> Instantiate (but do not process/build) TransformedDataSet and VAQIndex objects. Create and process QuerySet object.
-        if self.mode == 'Q':
+        elif self.mode == 'Q':
             TDS_start_time = timeit.default_timer()
             print("Instantiating TransformedDataSet")        
             self.TDS = TransformedDataSet(ctx=self)
@@ -169,6 +173,36 @@ class QSession:
             self.QS = QuerySet(ctx=self)
             self.QS.process()
             self.debug_timer('QSession.run', QS_start_time, "QuerySet processing elapsed time")
+            print()
+
+        # Mode R : REBUILD -> Instantiate (but do not process/build) TransformedDataSet and VAQIndex objects. Call Rebuild of VAQIndex
+        elif self.mode == 'R':
+            TDS_start_time = timeit.default_timer()
+            print("Instantiating TransformedDataSet")        
+            self.TDS = TransformedDataSet(ctx=self)
+            self.debug_timer('QSession.run', TDS_start_time, "TransformedDataSet processing elapsed time")
+            print()                 
+            
+            VAQ_start_time = timeit.default_timer()
+            print("Instantiating VAQIndex")        
+            self.VAQ = VAQIndex(ctx=self)
+            self.VAQ.rebuild()
+            self.debug_timer('QSession.run', VAQ_start_time, "VAQIndex processing elapsed time")        
+            print()
+
+        # Mode P : PRINT -> Instantiate (but do not process/build) TransformedDataSet and VAQIndex objects. Call prvd function of VAQIndex
+        elif self.mode == 'P':
+            TDS_start_time = timeit.default_timer()
+            print("Instantiating TransformedDataSet")        
+            self.TDS = TransformedDataSet(ctx=self)
+            self.debug_timer('QSession.run', TDS_start_time, "TransformedDataSet processing elapsed time")
+            print()                 
+            
+            VAQ_start_time = timeit.default_timer()
+            print("Instantiating VAQIndex")        
+            self.VAQ = VAQIndex(ctx=self)
+            self.VAQ.prvd()
+            self.debug_timer('QSession.run', VAQ_start_time, "VAQIndex processing elapsed time")        
             print()
 
                 
