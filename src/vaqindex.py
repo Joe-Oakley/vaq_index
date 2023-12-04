@@ -32,7 +32,7 @@ class VAQIndex:
     def _initialise(self):
 
         # Set full filename
-        self.full_vaq_fname = os.path.join(self.ctx.path, '') + self.ctx.fname + '.vaq'
+        self.full_vaq_fname = os.path.join(self.ctx.dataset_path, '') + self.ctx.fname + '.vaq'
         
         if self.ctx.non_uniform_bit_alloc == False:
             assert self.ctx.bit_budget % self.ctx.num_dimensions == 0, "Bit budget cannot be evenly divided among dimensions (uniform bit allocation)."
@@ -47,7 +47,7 @@ class VAQIndex:
                 self._load_vaqdata()
 
         if self.ctx.use_qhist:
-            self.full_weights_fname = os.path.join(self.ctx.path, '') + self.ctx.fname + '.weights'
+            self.full_weights_fname = os.path.join(self.ctx.dataset_path, '') + self.ctx.fname + '.weights'
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
     # Uses transformed file 
@@ -517,12 +517,12 @@ class VAQIndex:
     
     # ----------------------------------------------------------------------------------------------------------------------------------------
     def _save_vaq_vars(self):
-        np.savez(os.path.join(self.ctx.path, '') + self.ctx.fname + '.vaqvars', 
+        np.savez(os.path.join(self.ctx.dataset_path, '') + self.ctx.fname + '.vaqvars',
                  CELLS=self.ctx.cells, BOUNDARY_VALS=self.ctx.boundary_vals)
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
     def _load_vaq_vars(self):
-        vaq_full_varfile = os.path.join(self.ctx.path, '') + self._find_file_by_suffix('.vaqvars.npz')
+        vaq_full_varfile = os.path.join(self.ctx.dataset_path, '') + self._find_file_by_suffix('.vaqvars.npz')
 
         print("Loading vaq variables from ", vaq_full_varfile)
         with np.load(vaq_full_varfile) as data:
@@ -533,7 +533,7 @@ class VAQIndex:
     def _find_file_by_suffix(self, suffix):
         hit_count = 0
         hits = []
-        for file in os.listdir(self.ctx.path):
+        for file in os.listdir(self.ctx.dataset_path):
             if file.endswith(suffix):
                 hits.append(file)
                 hit_count += 1

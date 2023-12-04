@@ -37,13 +37,13 @@ class QuerySet:
 
         # Set up filenames. If user has specified a query file name, use this, otherwise default to the dataset name as the stub
         if self.ctx.query_fname is not None:
-            self.full_query_fname = os.path.join(self.ctx.path, '') + self.ctx.query_fname
-            self.full_res_fname = os.path.join(self.ctx.path, '') + self.ctx.query_fname + '.res'
-            self.full_metrics_fname = os.path.join(self.ctx.path, '') + self.ctx.query_fname + '.met'
+            self.full_query_fname = os.path.join(self.ctx.dataset_path, '') + self.ctx.query_fname
+            self.full_res_fname = os.path.join(self.ctx.dataset_path, '') + self.ctx.query_fname + '.res'
+            self.full_metrics_fname = os.path.join(self.ctx.dataset_path, '') + self.ctx.query_fname + '.met'
         else:
-            self.full_query_fname = os.path.join(self.ctx.path, '') + self.ctx.fname + '_qry'
-            self.full_res_fname = os.path.join(self.ctx.path, '') + self.ctx.fname + '.res'
-            self.full_metrics_fname = os.path.join(self.ctx.path, '') + self.ctx.fname + '.met'
+            self.full_query_fname = os.path.join(self.ctx.dataset_path, '') + self.ctx.fname + '_qry'
+            self.full_res_fname = os.path.join(self.ctx.dataset_path, '') + self.ctx.fname + '.res'
+            self.full_metrics_fname = os.path.join(self.ctx.dataset_path, '') + self.ctx.fname + '.met'
 
     # ----------------------------------------------------------------------------------------------------------------------------------------
     # Build will call this function followed by _transform_query_file()
@@ -272,7 +272,7 @@ class QuerySet:
                 # self.ctx.debug_timer('QuerySet._run_phase_one', qblock_reft, msg, 2)
 
             # x = np.logical_not(CSET == R).astype(np.int32)
-            x = np.logical_not(CSET == R).astype(np.float32)
+            x = np.logical_not(CSET == R).astype(np.float32)  # Handling the case where the query vector is itself in the cell hence the distance is 0
 
             # Calculate L (lower bound): L=L+x.*S1;    L is (num_vectors, 1).
             # Adds the lower bound distance for the dimension in question, to a running total which becomes the overall (squared) lower bound distance. 

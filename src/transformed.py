@@ -22,8 +22,8 @@ class TransformedDataSet:
         self._load_dataset_vars()
 
         # Initialise variables. Note that "context" variables in the parent class/object are accessed/set, as well as local properties (filenames)
-        self.full_tf_fname = os.path.join(self.ctx.path, '') + self.ctx.fname + '.tf'
-        self.full_tp_fname = os.path.join(self.ctx.path, '') + self.ctx.fname + '.tp'
+        self.full_tf_fname = os.path.join(self.ctx.dataset_path, '') + self.ctx.fname + '.tf'
+        self.full_tp_fname = os.path.join(self.ctx.dataset_path, '') + self.ctx.fname + '.tp'
         
         # Calculate new properties for number of words/vectors per block in transformed dataset. There are fewer words in this dataset,
         # since identifiers have been removed.
@@ -43,7 +43,7 @@ class TransformedDataSet:
     # ----------------------------------------------------------------------------------------------------------------------------------------
     def _load_dataset_vars(self):
 
-        dataset_full_varfile = os.path.join(self.ctx.path, '') + self._find_file_by_suffix('.dsvars.npz')
+        dataset_full_varfile = os.path.join(self.ctx.dataset_path, '') + self._find_file_by_suffix('.dsvars.npz')
 
         print("Loading dataset variables from ", dataset_full_varfile)
         with np.load(dataset_full_varfile) as data:
@@ -55,7 +55,7 @@ class TransformedDataSet:
     def _find_file_by_suffix(self, suffix):
         hit_count = 0
         hits = []
-        for file in os.listdir(self.ctx.path):
+        for file in os.listdir(self.ctx.dataset_path):
             if file.endswith(suffix):
                 hits.append(file)
                 hit_count += 1
