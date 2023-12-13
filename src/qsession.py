@@ -10,7 +10,8 @@ from datetime import datetime
 class QSession:
     DEBUG = True
 
-    def __init__(self, path, fname, shape: Tuple[int, int],  mode: Literal['F', 'B', 'Q', 'R', 'P'] = "B", create_qhist=True, use_qhist=True,
+    def __init__(self, path, fname, shape: Tuple[int, int], mode: Literal['F', 'B', 'Q', 'R', 'P'] = "B",
+                 create_qhist=True, use_qhist=True,
                  query_k=2, query_fname=None,
                  qhist_fname=None, num_blocks=1, word_size=4, big_endian=False, \
                  q_lambda=1, bit_budget=0, non_uniform_bit_alloc=True, design_boundaries=True, dual_phase=True,
@@ -38,7 +39,8 @@ class QSession:
 
         # ----------- COMPUTED STATE
         self.state: Dict[str, Union[np.ndarray, VectorFile]] = {
-            "ORIGINAL_FILE": VectorFile(Path(os.path.join(self.dataset_path, '') + self.fname), self.shape, big_endian=self.big_endian, offsets=(1, 0))
+            "ORIGINAL_FILE": VectorFile(Path(os.path.join(self.dataset_path, self.fname)), self.shape,
+                                        big_endian=self.big_endian, offsets=(1, 0))
         }
 
         # ------------ OTHER
@@ -70,9 +72,21 @@ class QSession:
             # ----------------------------------------------------------------------------------------------------------------------------------------
 
     def run(self):
+        from pipeline.transformations import KLT
+        from pipeline.indexes import VAQIndex
+        from pipeline.queryset import QuerySetGenerator, VAQQuerySet
+        salam = KLT(self).process()
+        salam = QuerySetGenerator(self, 100).process(salam)
+        salam = VAQIndex(self, self.non_uniform_bit_alloc, self.bit_budget, self.design_boundaries,
+                         self.use_qhist).process()
+        salam = VAQQuerySet(self, self.query_k).process()
+        print("DONE")
+        pass
+
+    def run_old(self):
 
         # Doing these here avoids circular dependency issues
-        from src.transformations.dataset import DataSet
+        from src.pipeline.dataset import DataSet
         from transformed import TransformedDataSet
         from vaqindex import VAQIndex
         from queryset import QuerySet

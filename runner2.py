@@ -1,5 +1,7 @@
 import sys
-sys.path.append('src')
+import os
+src_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), 'src'))
+sys.path.insert(0, src_dir)
 from pathlib import Path
 
 from qsession import QSession as QSession
