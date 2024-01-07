@@ -24,7 +24,7 @@ class VAQIndex(PipelineElement):
     def __calculate_energies(self):
         transformed_file = self.session.state["TRANSFORMED_FILE"]
         energies = np.zeros(transformed_file.shape[1], dtype=np.float32)
-        with transformed_file.open(mode="r") as f:
+        with transformed_file.open(mode="rb") as f:
             for block in f:
                 block = np.square(block)
                 energies += np.sum(block, axis=0)
@@ -65,7 +65,7 @@ class VAQIndex(PipelineElement):
         cells = self.session.state["DIM_CELLS"]
         boundary_vals = np.ones((np.max(cells) + 1, num_dimensions), dtype=np.float32) * np.nan
         transformed_tp_file = self.session.state["TRANSFORMED_TP_FILE"]
-        with transformed_tp_file.open(mode='r') as f:
+        with transformed_tp_file.open(mode='rb') as f:
             for block_count, block in enumerate(f):
                 # Sort the block. N.B., can change np sort algorithm (
                 # https://numpy.org/doc/stable/reference/generated/numpy.sort.html)
@@ -88,7 +88,7 @@ class VAQIndex(PipelineElement):
         transformed_tp_file = self.session.state["TRANSFORMED_TP_FILE"]
         cells = self.session.state["DIM_CELLS"]
         boundary_vals = self.session.state["BOUNDARY_VALS_MATRIX"]
-        with transformed_tp_file.open(mode='r') as f:
+        with transformed_tp_file.open(mode='rb') as f:
             for block_count, block in enumerate(f):
                 # Extract cells for current dimension
                 cells_for_dim = cells[block_count]
@@ -240,15 +240,14 @@ class VAQIndex(PipelineElement):
             Path(os.path.join(self.session.dataset_path, f"vaq_{self.session.fname}")), transformed_tp_file.shape,
             np.uint8, np.uint8, transformed_tp_file.num_blocks)
         num_dimensions, num_vectors = transformed_tp_file.shape
-        with transformed_tp_file.open(mode="r") as f:
+        with transformed_tp_file.open(mode="rb") as f:
             with vaq_file.open(mode='wb') as vaq_f:
                 for block_count, block in enumerate(f):
-                    cset = np.empty(num_vectors, dtype=np.uint8) * np.nan
+                    cset = np.empty(num_vectors, dtype=np.uint8)
                     for i in range(cells[block_count]):
                         l = boundary_vals[i, block_count]
                         r = boundary_vals[i + 1, block_count]
-                        A = np.where(np.logical_and(block >= l, block < r))[0]
-                        cset[A] = i
+                        cset[np.logical_and(block >= l, block < r)[0]] = i
                     assert not (cset == np.nan).any(), "Some of the vectors did not find a cell"
                     vaq_f.write(cset)
 
@@ -262,4 +261,5 @@ class VAQIndex(PipelineElement):
         if self.design_boundaries:
             self.__design_boundaries()
         self.__build_vaq_file()
+
         return {"created": ("DIM_ENERGIES", "DIM_CELLS", "BOUNDARY_VALS_MATRIX", "VAQ_INDEX_FILE")}

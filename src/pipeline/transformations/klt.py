@@ -18,7 +18,7 @@ class KLT(PipelineElement):
                                      block.shape[0])
                 running_mean = np.add(running_mean, dim_sums) if running_mean is not None else dim_sums
         self.session.state["DIM_MEANS"] = np.divide(running_mean,
-                                                   original_file.num_blocks).astype(np.float32)
+                                                    original_file.num_blocks).astype(np.float32)
 
     def __calc_cov_matrix(self):
         running_cov = None
@@ -50,7 +50,7 @@ class KLT(PipelineElement):
             Path(os.path.join(self.session.dataset_path, f"klt_{self.session.fname}")), original_file.shape,
             original_file.dtype, original_file.stored_dtype, original_file.num_blocks)
         with self.session.state["TRANSFORMED_FILE"].open(mode="wb") as tf:
-            with self.session.state["ORIGINAL_FILE"].open("r") as f:
+            with self.session.state["ORIGINAL_FILE"].open("rb") as f:
                 for block in f:
                     Y = np.subtract(block, self.session.state["DIM_MEANS"])
                     Z = np.matmul(Y, self.session.state["TRANSFORM_MATRIX"])
@@ -59,17 +59,25 @@ class KLT(PipelineElement):
     def __build_transposed_transformed_file(self):
         transformed_file: VectorFile = self.session.state["TRANSFORMED_FILE"]
         self.session.state["TRANSFORMED_TP_FILE"] = VectorFile(
-            Path(os.path.join(self.session.dataset_path, f"klt_tp_{self.session.fname}")), (transformed_file.shape[1], transformed_file.shape[0]),
+            Path(os.path.join(self.session.dataset_path, f"klt_tp_{self.session.fname}")),
+            (transformed_file.shape[1], transformed_file.shape[0]),
             transformed_file.dtype, transformed_file.stored_dtype, transformed_file.shape[1])
         with self.session.state["TRANSFORMED_TP_FILE"].open(mode="wb") as tf:
-            with transformed_file.open(mode='r') as f:
+            with transformed_file.open(mode='rb') as f:
                 for i in range(transformed_file.shape[1]):
                     XX = np.zeros(transformed_file.shape[0], dtype=np.float32)
                     ind = 0
                     for block in f:
                         XX[ind:ind + block.shape[0]] = block[:, i]
-                        ind = block.shape[0]
+                        ind += block.shape[0]
                     tf.write(XX)
+
+    def __transform_function(self, block):
+        dim_means = self.session.state["DIM_MEANS"]
+        transform_matrix = self.session.state['TRANSFORM_MATRIX']
+        rep_mean = np.tile(dim_means, (block.shape[0], 1))  # (num_queries, num_dims)
+        Y = np.subtract(block, rep_mean)
+        return np.matmul(Y, transform_matrix)
 
     def process(self, pipe_state: TransformationSummary = None) -> TransformationSummary:
         self.__calc_dim_means()
@@ -77,4 +85,5 @@ class KLT(PipelineElement):
         self.__calc_transform_matrix()
         self.__build_transformed_file()
         self.__build_transposed_transformed_file()
-        return {"created": ("DIM_MEANS", "COV_MATRIX", "TRANSFORM_MATRIX", "TRANSFORMED_FILE", "TRANSFORMED_TP_FILE")}
+        self.session.state["TRANSFORM_FUNCTION"] = self.__transform_function
+        return {"created": ("DIM_MEANS", "COV_MATRIX", "TRANSFORM_MATRIX", "TRANSFORM_FUNCTION", "TRANSFORMED_FILE", "TRANSFORMED_TP_FILE")}

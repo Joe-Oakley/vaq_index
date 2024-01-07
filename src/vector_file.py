@@ -67,6 +67,41 @@ class VectorFile:
                 return block.astype(self.dataset.dtype)
             return block
 
+        def read_one(self, vector_ind: int) -> np.ndarray:
+            assert 0 <= vector_ind < self.dataset.shape[
+                0], f"Vector index should be in range (0, {self.dataset.shape[0]}) "
+            start_index = self.dataset.num_words_per_vector * vector_ind
+            count = (self.dataset.shape[1] + self.dataset.offsets[0] + self.dataset.offsets[1])
+            self.file.seek(start_index, os.SEEK_SET)
+            vector = np.fromfile(file=self.file, count=count, dtype=self.dataset.stored_dtype)
+            if self.dataset.big_endian:
+                vector = vector.byteswap(inplace=True)
+            vector = np.reshape(vector,
+                                (count),
+                                order="C")
+            vector = vector[
+                     self.dataset.offsets[0] if self.dataset.offsets[0] > 0 else None: -self.dataset.offsets[1] if
+                     self.dataset.offsets[1] > 0 else None]
+            if self.dataset.stored_dtype is not self.dataset.dtype:
+                return vector.astype(self.dataset.dtype)
+            return vector
+
+        def unsafe_read_all(self) -> np.ndarray:
+            self.file.seek(0, os.SEEK_SET)
+            block = np.fromfile(file=self.file, dtype=self.dataset.stored_dtype)
+            if self.dataset.big_endian:
+                block = block.byteswap(inplace=True)
+            block = np.reshape(block,
+                               (self.dataset.shape[0],
+                                self.dataset.shape[1] + self.dataset.offsets[0] + self.dataset.offsets[1]),
+                               order="C")
+            block = block[:,
+                    self.dataset.offsets[0] if self.dataset.offsets[0] > 0 else None: -self.dataset.offsets[1] if
+                    self.dataset.offsets[1] > 0 else None]
+            if self.dataset.stored_dtype is not self.dataset.dtype:
+                return block.astype(self.dataset.dtype)
+            return block
+
         def write(self, val: np.ndarray):
             """ Convert to stored dtype and store """
             self.__assertion_file_check()
@@ -106,6 +141,7 @@ class VectorFile:
 if __name__ == "__main__":
     a = VectorFile(Path("../datasets/siftsmall/siftsmall"), (10000, 128), num_blocks=5, offsets=(1, 0))
     with a.open() as m:
-        for res in m:
-            print(res.shape)
-    print("")
+        all = m.unsafe_read_all()
+        i = 0
+        for block in m:
+            i += block.shape[0]

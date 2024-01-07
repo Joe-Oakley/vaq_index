@@ -1,7 +1,7 @@
 import numpy as np
 import os
 from pathlib import Path
-from typing import Dict, Literal, Tuple, Union
+from typing import Dict, Literal, Tuple, Union, Callable
 from vector_file import VectorFile
 import timeit
 from datetime import datetime
@@ -38,7 +38,7 @@ class QSession:
         self.vecs_to_print = vecs_to_print
 
         # ----------- COMPUTED STATE
-        self.state: Dict[str, Union[np.ndarray, VectorFile]] = {
+        self.state: Dict[str, Union[np.ndarray, VectorFile, Callable]] = {
             "ORIGINAL_FILE": VectorFile(Path(os.path.join(self.dataset_path, self.fname)), self.shape,
                                         big_endian=self.big_endian, offsets=(1, 0))
         }
@@ -75,10 +75,12 @@ class QSession:
         from pipeline.transformations import KLT
         from pipeline.indexes import VAQIndex
         from pipeline.queryset import QuerySetGenerator, VAQQuerySet
+        from pipeline.analysis import AnalyseVaqFile
         salam = KLT(self).process()
         salam = QuerySetGenerator(self, 100).process(salam)
         salam = VAQIndex(self, self.non_uniform_bit_alloc, self.bit_budget, self.design_boundaries,
                          self.use_qhist).process()
+        salam = AnalyseVaqFile(self).process(salam)
         salam = VAQQuerySet(self, self.query_k).process()
         print("DONE")
         pass

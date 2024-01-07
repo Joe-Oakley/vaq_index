@@ -23,7 +23,7 @@ class QuerySetGenerator(PipelineElement):
         sel.sort()
         i, j = 0, 0
         with queryset_file.open('wb') as qf:
-            with original_file.open("r") as f:
+            with original_file.open("rb") as f:
                 for block in f:
                     for z in range(i, len(sel)):
                         ind = sel[z]

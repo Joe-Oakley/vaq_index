@@ -2,6 +2,8 @@ from pipeline import TransformationSummary, PipelineElement
 import numpy as np
 from qsession import QSession
 from scipy.ndimage import minimum_filter1d, maximum_filter1d
+import matplotlib.pyplot as plt
+
 
 class VAQQuerySet(PipelineElement):
     MAX_UINT8 = 255
@@ -11,14 +13,8 @@ class VAQQuerySet(PipelineElement):
         self.query_k = query_k
 
     def __transform_queryset(self):
-        dim_means = self.session.state["DIM_MEANS"]
-        transform_matrix = self.session.state['TRANSFORM_MATRIX']
-        with self.session.state["QUERYSET_FILE"].open(mode="r") as f:
-            block = f[0]
-            rep_mean = np.tile(dim_means, (block.shape[0], 1))  # (num_queries, num_dims)
-            Y = np.subtract(block, rep_mean)
-            Z = np.matmul(Y, transform_matrix)
-            self.session.state["TRANSFORMED_QUERYSET"] = Z
+        with self.session.state["QUERYSET_FILE"].open(mode="rb") as f:
+            self.session.state["TRANSFORMED_QUERYSET"] = self.session.state["TRANSFORM_FUNCTION"](f[0])
 
     def _run_phase_one(self, query_idx):
         Q = self.session.state["TRANSFORMED_QUERYSET"]
@@ -28,14 +24,12 @@ class VAQQuerySet(PipelineElement):
         num_dimensions, num_vectors = vaq_index_file.shape
         q = Q[query_idx]
         # These are (1, 50) for 50-NN
-        UP = np.ones(self.query_k, dtype=np.float32) * np.inf
-
         L = np.zeros(num_vectors, dtype=np.float32)
         U = np.zeros(num_vectors, dtype=np.float32)
         D = np.square(np.subtract(boundary_vals, q[None, :].ravel()))
         D_MIN = minimum_filter1d(D, size=2, axis=0, origin=-1)
         D_MAX = maximum_filter1d(D, size=2, axis=0, origin=-1)
-        with vaq_index_file.open(mode='r') as vaq_f:
+        with vaq_index_file.open(mode='rb') as vaq_f:
             for block_count, block in enumerate(vaq_f):
                 cells_for_dim = cells[block_count]
                 qj = q[block_count]
@@ -46,35 +40,57 @@ class VAQQuerySet(PipelineElement):
                     R = np.min(target_cells)
                 L += (D_MIN[block, block_count] * (block != R).astype(np.float32))[0]
                 U += D_MAX[block, block_count][0]
+        return L, U
 
-        elim = 0
+    def _run_phase_two(self, query_idx, L, U):
+        transformed_dataset = self.session.state['TRANSFORMED_FILE']
+        J = np.argsort(L, axis=0)
+        LL = np.sort(L, axis=0)
+        ANS = np.ones(self.query_k, dtype=np.float32) * np.inf
+        V = np.ones(self.query_k, dtype=np.float32) * np.inf
+        num_dimensions, num_vectors = self.session.state["VAQ_INDEX_FILE"].shape
+        q = self.session.state["TRANSFORMED_QUERYSET"][query_idx]
 
-        get_max_next_time = True
-        for i in range(num_vectors):
-            if get_max_next_time:
-                max_up = UP.max()  # https://stackoverflow.com/questions/10943088/numpy-max-or-max-which-one-is-faster
-                max_up_idx = np.argmax(UP)  # If multiple same max val, returns min idx.
-            if L[i] <= max_up:
-                if U[i] <= max_up:
-                    UP[max_up_idx] = U[i]
-                    get_max_next_time = True
+        # Loop over all vectors; is this sensible; don't we just want to consider candidates only in terms of their LBs?
+        vectors_considered_p2 = 0
+        with transformed_dataset.open(mode="rb") as tr_file:
+            for i in range(num_vectors):
+
+                # If lower bound of i is greater than 50th best upper bound, stop
+                if LL[i] > ANS[self.query_k - 1]:
+                    break
                 else:
-                    get_max_next_time = False
+                    # Random read (of num_dimensions words) from transformed file.
+                    read_vector = tr_file.read_one(J[i])
 
-                    # # Adding elim += 1 makes P1 elims inconsistent with P2 visits.
-                    # elim += 1
+                    # Append squared distance between self.q (could also use self.Q[query_idx, :]) and the vector read from disk to ANS
+                    # self.q and TSET are both (1, num_dimensions)
+                    T = np.append(ANS, np.sum(np.square(q - read_vector)))
 
-            else:
-                elim += 1
+                    # Append J[i] to V
+                    W = np.append(V, J[i])
 
-        UP = np.sort(UP, axis=0)
-        print(elim)
+                    # Sort ANS and also keep original locations
+                    I = np.argsort(T)
+                    T = np.sort(T)
+
+                    # Trim ANS to only first query_k
+                    ANS = T[0:self.query_k]
+
+                    # V=W(I(1:QUERY_SIZE)); think these are the indices of answers?
+                    V = W[I[0:self.query_k]]
+
+                    # Increment counter; not using i since we'll lose it after the loop
+                    vectors_considered_p2 += 1
+        print(f"{vectors_considered_p2} Vectors considered ")
 
     def __run_queries(self):
         transformed_queryset = self.session.state["TRANSFORMED_QUERYSET"]
         for i in range(transformed_queryset.shape[0]):
-            self._run_phase_one(i)
+            L, U = self._run_phase_one(i)
+            self._run_phase_two(i, L, U)
 
     def process(self, pipe_state: TransformationSummary = None) -> TransformationSummary:
         self.__transform_queryset()
         self.__run_queries()
+        return {"created": ("TRANSFORMED_QUERYSET",)}
