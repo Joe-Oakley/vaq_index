@@ -7,9 +7,9 @@ import numpy as np
 import random
 
 
-class QuerySetGenerator(PipelineElement):
+class RepeatingQuerysetGenerator(PipelineElement):
     def __init__(self, session: QSession, num_samples: int):
-        super(QuerySetGenerator, self).__init__(session)
+        super(RepeatingQuerysetGenerator, self).__init__(session)
         self.num_samples = num_samples
 
     def __generate_queryset_file(self):
@@ -19,7 +19,7 @@ class QuerySetGenerator(PipelineElement):
             (self.num_samples, original_file.shape[1]),
             original_file.dtype, original_file.stored_dtype, 1)
         all_vector_inds = list(np.arange(0, original_file.shape[0], dtype=np.int32))
-        sel = random.sample(all_vector_inds, self.num_samples)
+        sel = random.sample(all_vector_inds, 1) * self.num_samples
         sel.sort()
         i, j = 0, 0
         with queryset_file.open('wb') as qf:

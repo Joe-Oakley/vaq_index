@@ -42,7 +42,7 @@ class QSession:
             "ORIGINAL_FILE": VectorFile(Path(os.path.join(self.dataset_path, self.fname)), self.shape,
                                         big_endian=self.big_endian, offsets=(1, 0))
         }
-
+        self.__pipeline = []
         # ------------ OTHER
         np.set_printoptions(linewidth=200)
         np.set_printoptions(suppress=True)
@@ -74,16 +74,22 @@ class QSession:
     def run(self):
         from pipeline.transformations import KLT
         from pipeline.indexes import VAQIndex
-        from pipeline.queryset import QuerySetGenerator, VAQQuerySet
-        from pipeline.analysis import AnalyseVaqFile
-        salam = KLT(self).process()
-        salam = QuerySetGenerator(self, 100).process(salam)
-        salam = VAQIndex(self, self.non_uniform_bit_alloc, self.bit_budget, self.design_boundaries,
-                         self.use_qhist).process()
-        salam = AnalyseVaqFile(self).process(salam)
-        salam = VAQQuerySet(self, self.query_k).process()
-        print("DONE")
-        pass
+        from pipeline.queryset import RandomQuerySetGenerator, VAQQuerySet, RepeatingQuerysetGenerator
+        from pipeline.analysis import AnalyseVaqIndex
+        self.__pipeline.extend([
+            KLT(self),
+            RandomQuerySetGenerator(self, 1000),
+            VAQIndex(self, self.non_uniform_bit_alloc, self.bit_budget, self.design_boundaries,
+                     self.use_qhist),
+            VAQQuerySet(self, self.query_k),
+            AnalyseVaqIndex(self),
+        ])
+        self.__run()
+
+    def __run(self):
+        prev_result = None
+        for element in self.__pipeline:
+            prev_result = element.process(prev_result)
 
     def run_old(self):
 

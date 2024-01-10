@@ -42,17 +42,18 @@ class VAQQuerySet(PipelineElement):
                 U += D_MAX[block, block_count][0]
         return L, U
 
-    def _run_phase_two(self, query_idx, L, U):
+    def _run_phase_two(self, query_idx, L, U) -> int:
+        top_k_results = self.session.state["TOP_K_RESULTS"]
         transformed_dataset = self.session.state['TRANSFORMED_FILE']
         J = np.argsort(L, axis=0)
         LL = np.sort(L, axis=0)
         ANS = np.ones(self.query_k, dtype=np.float32) * np.inf
-        V = np.ones(self.query_k, dtype=np.float32) * np.inf
+        V = np.ones(self.query_k, dtype=np.int64)
         num_dimensions, num_vectors = self.session.state["VAQ_INDEX_FILE"].shape
         q = self.session.state["TRANSFORMED_QUERYSET"][query_idx]
 
         # Loop over all vectors; is this sensible; don't we just want to consider candidates only in terms of their LBs?
-        vectors_considered_p2 = 0
+        vectors_accessed_p2 = 0
         with transformed_dataset.open(mode="rb") as tr_file:
             for i in range(num_vectors):
 
@@ -81,16 +82,24 @@ class VAQQuerySet(PipelineElement):
                     V = W[I[0:self.query_k]]
 
                     # Increment counter; not using i since we'll lose it after the loop
-                    vectors_considered_p2 += 1
-        print(f"{vectors_considered_p2} Vectors considered ")
+                    vectors_accessed_p2 += 1
+            for i, ind in enumerate(V):
+                top_k_results[query_idx, i, :] = tr_file.read_one(ind)
+
+        return vectors_accessed_p2
 
     def __run_queries(self):
         transformed_queryset = self.session.state["TRANSFORMED_QUERYSET"]
+        phase_2_vectors_accessed = self.session.state["PHASE_2_VECTORS_ACCESSED"]
         for i in range(transformed_queryset.shape[0]):
             L, U = self._run_phase_one(i)
-            self._run_phase_two(i, L, U)
+            phase_2_vectors_accessed[i] = self._run_phase_two(i, L, U)
+        print(f"Average number of vectors accessed for phase 2 is %d" % (phase_2_vectors_accessed.mean(),))
 
     def process(self, pipe_state: TransformationSummary = None) -> TransformationSummary:
+        self.session.state["PHASE_2_VECTORS_ACCESSED"] = np.zeros(self.session.state["QUERYSET_FILE"].shape[0])
+        self.session.state["TOP_K_RESULTS"] = np.zeros((self.session.state["QUERYSET_FILE"].shape[0], self.query_k,
+                                                        self.session.state["QUERYSET_FILE"].shape[1]))
         self.__transform_queryset()
         self.__run_queries()
-        return {"created": ("TRANSFORMED_QUERYSET",)}
+        return {"created": ("TRANSFORMED_QUERYSET", "PHASE_2_VECTORS_ACCESSED", "TOP_K_RESULTS")}

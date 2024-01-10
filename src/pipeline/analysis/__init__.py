@@ -1,1 +1,1 @@
-from .analyse_vaq_file import AnalyseVaqFile
+from .analyse_vaq_index import AnalyseVaqIndex
